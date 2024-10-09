@@ -2,7 +2,7 @@
   "name": "pixpal",
   "version": "0.0.0",
   "description": "Indexed image format for palette manipulation.",
-  "main": "lib/pixpal.js",
+  "main": "lib/PixPal.js",
   "directories": {
     "test": "test"
   },
