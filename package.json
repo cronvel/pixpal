@@ -1,0 +1,39 @@
+{
+  "name": "pixpal",
+  "version": "0.0.0",
+  "description": "Indexed image format for palette manipulation.",
+  "main": "lib/pixpal.js",
+  "directories": {
+    "test": "test"
+  },
+  "dependencies": {
+  },
+  "scripts": {
+    "test": "tea-time -R dot"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cronvel/pixpal.git"
+  },
+  "keywords": [
+    "image",
+    "palette",
+    "8-bit",
+    "indexed"
+  ],
+  "author": "Cédric Ronvel",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/cronvel/pixpal/issues"
+  },
+  "copyright": {
+    "title": "PixPal",
+    "years": [
+      2024
+    ],
+    "owner": "Cédric Ronvel"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
