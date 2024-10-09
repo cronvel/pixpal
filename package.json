@@ -7,6 +7,7 @@
     "test": "test"
   },
   "dependencies": {
+    "crc-32": "^1.2.2"
   },
   "scripts": {
     "test": "tea-time -R dot"

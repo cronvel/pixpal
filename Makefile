@@ -5,8 +5,7 @@
 
 # The first rule is the default rule, when invoking "make" without argument...
 # Build every buildable things
-#all: install doc browser
-all: install doc
+all: install doc browser
 
 # Just install things so it works, basicaly: it just performs a "npm install --production" ATM
 install: log/npm-install.log
@@ -15,10 +14,13 @@ install: log/npm-install.log
 dev-install: log/npm-dev-install.log
 
 # Build
-#build: browser
+build: browser
 
 # Build the browser lib
-#browser: browser/svg-kit.js browser/svg-kit.min.js
+browser: browser/PixPal.js browser/PixPal.min.js
+
+# Build only the non-minified browser lib
+dev-browser: browser/PixPal.js
 
 # This run the JsHint & Mocha BDD test, display it to STDOUT & save it to log/mocha.log and log/jshint.log
 test: log/jshint.log log/mocha.log
@@ -50,12 +52,12 @@ UGLIFY=uglifyjs
 # Files rules
 
 # Build the browser lib
-#browser/svg-kit.js: lib/*.js lib/*/*.js
-#	${BROWSERIFY} lib/svg-kit.js -i fs -i image-size -s svgKit -o browser/svg-kit.js
+browser/PixPal.js: lib/*.js
+	${BROWSERIFY} lib/PixPal.js -i fs -i image-size -s svgKit -o browser/PixPal.js
 
 # Build the browser minified lib
-#browser/svg-kit.min.js: browser/svg-kit.js
-#	${UGLIFY} browser/svg-kit.js -o browser/svg-kit.min.js -m
+browser/PixPal.min.js: browser/PixPal.js
+	${UGLIFY} browser/PixPal.js -o browser/PixPal.min.js -m
 
 # JsHint STDOUT test
 log/jshint.log: log/npm-dev-install.log lib/*.js test/*.js
