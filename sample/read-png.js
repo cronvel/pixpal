@@ -15,6 +15,19 @@ if ( process.argv.length < 3 ) {
 }
 
 var sourceFile = process.argv[ 2 ] ;
+var outputFile = process.argv[ 3 ] ?? null ;
 
-PixPal.loadPng( sourceFile , { crc32: true } ) ;
+
+async function test() {
+	if ( outputFile ) {
+		let png = await PixPal.Png.load( sourceFile , { crc32: true } ) ;
+		console.log( "\n\n### SAVING!" ) ;
+		png.save( outputFile ) ;
+	}
+	else {
+		await PixPal.loadPng( sourceFile , { crc32: true } ) ;
+	}
+}
+
+test() ;
 

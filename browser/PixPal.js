@@ -60,6 +60,9 @@ function PixPal( width , height , palette , pixels ) {
 
 module.exports = PixPal ;
 
+// Also exports:
+PixPal.Png = Png ;
+
 
 
 PixPal.prototype.setPalette = function( palette ) {
@@ -206,11 +209,14 @@ const crc32 = require( 'crc-32' ) ;
 
 // Includes depending on the environment
 var DecompressionStream = null ;
-var getFileAsync = null ;
+var CompressionStream = null ;
+var loadFileAsync = null ;
+var saveFileAsync = null ;
 
 if ( process.browser ) {
 	DecompressionStream = window.DecompressionStream ;
-	getFileAsync = async ( url ) => {
+	CompressionStream = window.CompressionStream ;
+	loadFileAsync = async ( url ) => {
 		var response = await fetch( 'tiny.png' ) ;
 		if ( ! response.ok ) {
 			throw new Error( "Can't retrieve file: '" + url + "', " + response.status + " - " + response.statusText ) ;
@@ -219,38 +225,40 @@ if ( process.browser ) {
 		var buffer = Buffer.from( bytes ) ;
 		return buffer ;
 	} ;
+	saveFileAsync = () => { throw new Error( "Can't save from the web" ) ; } ;
 }
 else {
 	let require_ = require ;	// this is used to fool Browserfify, so it doesn't try include this in the build
-	DecompressionStream = require_( 'stream/web' ).DecompressionStream ;
+	( { DecompressionStream , CompressionStream } = require_( 'stream/web' ) ) ;
 	let fs = require_( 'fs' ) ;
-	getFileAsync = url => fs.promises.readFile( url ) ;
+	loadFileAsync = url => fs.promises.readFile( url ) ;
+	saveFileAsync = ( url , data ) => fs.promises.writeFile( url , data ) ;
 }
 
 
 
 function Png() {
 	// IHDR
-	this.width = -1 ;
-	this.height = -1 ;
-	this.bitDepth = -1 ;
-	this.colorType = -1 ;
-	this.compressionMethod = -1 ;
-	this.filterMethod = -1 ;
-	this.interlaceMethod = -1 ;
+	this.width = - 1 ;
+	this.height = - 1 ;
+	this.bitDepth = - 1 ;
+	this.colorType = - 1 ;
+	this.compressionMethod = - 1 ;
+	this.filterMethod = - 1 ;
+	this.interlaceMethod = - 1 ;
 
 	// PLTE and tRNS
 	this.palette = [] ;
 
 	// bKGD
-	this.backgroundColorIndex = -1 ;
+	this.backgroundColorIndex = - 1 ;
 
 	// IDAT
 	this.idatBuffers = [] ;
 
 	// Final
-	this.bitsPerPixel = -1 ;
-	this.decodedBytesPerPixel = -1 ;
+	this.bitsPerPixel = - 1 ;
+	this.decodedBytesPerPixel = - 1 ;
 	this.imageData = null ;
 }
 
@@ -267,7 +275,7 @@ Png.COLOR_TYPE_RGBA = 6 ;
 
 
 Png.load = async function( url , options = {} ) {
-	var buffer = await getFileAsync( url ) ;
+	var buffer = await loadFileAsync( url ) ;
 	return Png.decode( buffer , options ) ;
 } ;
 
@@ -281,8 +289,75 @@ Png.decode = async function( buffer , options = {} ) {
 
 
 
+Png.prototype.save = async function( url , options = {} ) {
+	var buffer = this.encode( options ) ;
+	await saveFileAsync( url , buffer ) ;
+} ;
+
+
+
+Png.prototype.encode = async function( options = {} ) {
+	var chunks = [] ;
+
+	// Add magic numbers
+	chunks.push( Buffer.from( PNG_MAGIC_NUMBERS ) ) ;
+
+	// IHDR: image header
+	this.addChunk( chunks , 'IHDR' , options ) ;
+
+	// PLTE: the palette for indexed PNG
+	this.addChunk( chunks , 'PLTE' , options ) ;
+
+	// tRNS: the color indexes for transparency
+	this.addChunk( chunks , 'tRNS' , options ) ;
+
+	// bKGD: the default background color
+	this.addChunk( chunks , 'bKGD' , options ) ;
+
+	// IDAT: the image pixel data
+	this.addChunk( chunks , 'IDAT' , options ) ;
+
+	return Buffer.concat( chunks ) ;
+} ;
+
+
+
+Png.prototype.addChunk = async function( chunks , chunkType , options ) {
+	if ( ! chunkEncoders[ chunkType ] ) { return ; }
+
+	var dataBuffer = await chunkEncoders[ chunkType ].call( this , options ) ;
+	if ( ! dataBuffer ) { return ; }
+
+	var chunkBuffer = this.generateChunkFromData( chunkType , dataBuffer ) ;
+	chunks.push( chunkBuffer ) ;
+} ;
+
+
+
+Png.prototype.generateChunkFromData = function( chunkType , dataBuffer ) {
+	// 4 bytes for the data length | 4 bytes type (ascii) | chunk data (variable length) | 4 bytes of CRC-32 (type + data)
+	var chunkBuffer = Buffer.alloc( CHUNK_META_SIZE + dataBuffer.length ) ;
+
+	chunkBuffer.writeInt32BE( dataBuffer.length ) ;
+	chunkBuffer.write( chunkType , 4 , 4 , 'latin1' ) ;
+	dataBuffer.copy( chunkBuffer , 8 ) ;
+
+	// Add the CRC-32, the 2nd argument of crc32.buf() is the seed, it's like building a CRC
+	// of a single buffer containing chunkType + dataBuffer.
+	var chunkComputedCrc32 = crc32.buf( dataBuffer , crc32.bstr( chunkType ) ) ;
+	chunkBuffer.writeInt32BE( chunkComputedCrc32 , chunkBuffer.length - 4 ) ;
+	console.log( "Generated chunk: '" + chunkType + "' of size: " + dataBuffer.length + " and CRC-32: " + chunkComputedCrc32 ) ;
+
+	return chunkBuffer ;
+} ;
+
+
+
 // A PNG file always starts with this bytes
 const PNG_MAGIC_NUMBERS = [ 0x89 , 0x50 , 0x4E , 0x47 , 0x0D , 0x0A , 0x1A , 0x0A ] ;
+const CHUNK_META_SIZE = 12 ;
+
+
 
 // Sadly it should be async, because browser's Compression API works with streams
 Png.prototype.decode = async function( buffer , options = {} ) {
@@ -294,7 +369,7 @@ Png.prototype.decode = async function( buffer , options = {} ) {
 			throw new Error( "Not a PNG, it doesn't start with PNG magic numbers" ) ;
 		}
 	}
-	
+
 	this.palette.length = 0 ;
 	this.imageData = null ;
 
@@ -303,9 +378,9 @@ Png.prototype.decode = async function( buffer , options = {} ) {
 		let chunkSize = buffer.readUInt32BE( offset ) ;
 		let chunkType = buffer.toString( 'latin1' , offset + 4 , offset + 8 ) ;
 		let chunkCrc32 = buffer.readInt32BE( offset + 8 + chunkSize ) ;
-		
+
 		console.log( "Found chunk: '" + chunkType + "' of size: " + chunkSize + " and CRC-32: " + chunkCrc32 ) ;
-		
+
 		if ( chunkDecoders[ chunkType ] ) {
 			// Node.js buffer.slice() create a view, be careful because TypedArray.slice() create a copy!
 
@@ -315,19 +390,20 @@ Png.prototype.decode = async function( buffer , options = {} ) {
 					throw new Error( "Bad CRC-32 for chunk '" + chunkType + "', expecting: " + chunkCrc32 + " but got: " + chunkComputedCrc32  ) ;
 				}
 			}
-			
+
 			chunkDecoders[ chunkType ].call( this , buffer.slice( offset + 8 , offset + 8 + chunkSize ) , options ) ;
 		}
 
 		offset += chunkSize + 12 ;
 	}
-	
+
 	await this.generateImageData() ;
 } ;
 
 
 
 const chunkDecoders = {} ;
+const chunkEncoders = {} ;
 
 chunkDecoders.IHDR = function( buffer , options ) {
 	let offset = 0 ;
@@ -339,10 +415,27 @@ chunkDecoders.IHDR = function( buffer , options ) {
 	this.compressionMethod = buffer.readUInt8( offset ) ; offset ++ ;
 	this.filterMethod = buffer.readUInt8( offset ) ; offset ++ ;
 	this.interlaceMethod = buffer.readUInt8( offset ) ; offset ++ ;
-	
+
 	this.computeBitsPerPixel() ;
 
 	console.log( "After IHDR:" , this ) ;
+} ;
+
+
+
+chunkEncoders.IHDR = function( options ) {
+	let buffer = new Buffer.allocUnsafe( 13 ) ;
+	let offset = 0 ;
+
+	buffer.writeUInt32BE( this.width , offset ) ; offset += 4 ;
+	buffer.writeUInt32BE( this.height , offset ) ; offset += 4 ;
+	buffer.writeUInt8( this.bitDepth , offset ) ; offset ++ ;
+	buffer.writeUInt8( this.colorType , offset ) ; offset ++ ;
+	buffer.writeUInt8( this.compressionMethod , offset ) ; offset ++ ;
+	buffer.writeUInt8( this.filterMethod , offset ) ; offset ++ ;
+	buffer.writeUInt8( this.interlaceMethod , offset ) ; offset ++ ;
+
+	return buffer ;
 } ;
 
 
@@ -368,6 +461,24 @@ chunkDecoders.PLTE = function( buffer , options ) {
 
 
 
+chunkEncoders.PLTE = function( options ) {
+	if ( this.colorType !== Png.COLOR_TYPE_INDEXED ) { return ; }
+	//if ( ! this.palette.length ) { return ; }
+
+	let buffer = new Buffer.allocUnsafe( this.palette.length * 3 ) ;
+
+	for ( let index = 0 , offset = 0 ; index < this.palette.length ; index ++ , offset += 3 ) {
+		let color = this.palette[ index ] ;
+		buffer.writeUInt8( color[ 0 ] , offset ) ;
+		buffer.writeUInt8( color[ 1 ] , offset + 1 ) ;
+		buffer.writeUInt8( color[ 2 ] , offset + 2 ) ;
+	}
+
+	return buffer ;
+} ;
+
+
+
 chunkDecoders.tRNS = function( buffer , options ) {
 	if ( this.colorType !== Png.COLOR_TYPE_INDEXED ) {
 		throw new Error( "Unsupported color type for tRNS: " + this.colorType ) ;
@@ -378,6 +489,22 @@ chunkDecoders.tRNS = function( buffer , options ) {
 	}
 
 	console.log( "tRNS:" , this.palette ) ;
+} ;
+
+
+
+chunkEncoders.tRNS = function( options ) {
+	if ( this.colorType !== Png.COLOR_TYPE_INDEXED || ! this.palette.length ) { return ; }
+
+	let transparentIndexes = [] ;
+
+	for ( let colorIndex = 0 ; colorIndex < this.palette.length ; colorIndex ++ ) {
+		if ( this.palette[ colorIndex ][ 3 ] < 128 ) { transparentIndexes.push( colorIndex ) ; }
+	}
+
+	if ( ! transparentIndexes.length ) { return ; }
+
+	return Buffer.from( transparentIndexes.length ) ;
 } ;
 
 
@@ -394,9 +521,58 @@ chunkDecoders.bKGD = function( buffer , options ) {
 
 
 
+chunkEncoders.bKGD = function( options ) {
+	if ( this.colorType !== Png.COLOR_TYPE_INDEXED || this.backgroundColorIndex < 0 ) { return ; }
+
+	let buffer = new Buffer.allocUnsafe( 1 ) ;
+	buffer.writeUInt8( this.backgroundColorIndex , 0 ) ;
+	return buffer ;
+} ;
+
+
+
 chunkDecoders.IDAT = function( buffer , options ) {
 	this.idatBuffers.push( buffer ) ;
 	console.log( "Raw IDAT:" , buffer , buffer.length ) ;
+} ;
+
+
+
+chunkEncoders.IDAT = async function( options ) {
+	if ( ! this.imageData ) { return ; }
+
+	if ( this.colorType !== Png.COLOR_TYPE_INDEXED ) {
+		throw new Error( "Unsupported color type for IDAT: " + this.colorType ) ;
+	}
+
+	if ( this.bitDepth !== 8 ) {
+		throw new Error( "Unsupported bitDepth type for IDAT encoder: " + this.bitDepth ) ;
+	}
+
+	if ( this.interlaceMethod ) {
+		throw new Error( "Interlace methods are unsupported (IDAT): " + this.interlaceMethod ) ;
+	}
+
+	var lineByteLength = this.width + 1 ;
+	var idatBuffer = Buffer.allocUnsafe( lineByteLength * this.height ) ;
+
+	// Prepare the PNG buffer, using only filter 0 and no Adam7, we just want it to work
+	for ( let y = 0 ; y < this.height ; y ++ ) {
+		offset = y * lineByteLength ;
+		
+		// We don't care for filters ATM, it requires heuristic, it's boring to do...
+		idatBuffer.writeUInt8( 0 , offset ) ;
+		
+		// Boring, Buffer has no .copyFrom(), and this.imageData is a UInt8ClampedArray...
+		for ( let x = 0 ; x < this.width ; x ++ ) {
+			idatBuffer.writeUInt8( this.imageData[ y * width + x ] , offset + 1 + x ) ;
+		}
+	}
+	
+	var compressedBuffer = await deflate( idatBuffer ) ;
+	console.log( "Compressed IDAT:" , compressedBuffer , compressedBuffer.length ) ;
+
+	return compressedBuffer ;
 } ;
 
 
@@ -413,20 +589,20 @@ Png.prototype.generateImageData = async function() {
 	this.imageData = new Uint8ClampedArray( this.width * this.height * this.decodedBytesPerPixel ) ;
 
 	var compressedBuffer = Buffer.concat( this.idatBuffers ) ;
-	var buffer = await deflate( compressedBuffer ) ;
+	var buffer = await inflate( compressedBuffer ) ;
 	console.log( "Decompressed IDAT:" , buffer , buffer.length ) ;
-	
+
 	var lineByteLength = 1 + Math.ceil( this.width * this.bitsPerPixel / 8 ) ;
-	var exepectedBufferLength = lineByteLength * this.height ;
+	var expectedBufferLength = lineByteLength * this.height ;
 	var imageDataLineByteLength = this.width * this.decodedBytesPerPixel ;
 
-	if ( exepectedBufferLength !== buffer.length ) {
-		throw new Error( "Expecting a decompressed buffer of length of " + exepectedBufferLength + " but got: " + buffer.length ) ;
+	if ( expectedBufferLength !== buffer.length ) {
+		throw new Error( "Expecting a decompressed buffer of length of " + expectedBufferLength + " but got: " + buffer.length ) ;
 	}
 
 	console.log( "lineByteLength:" , lineByteLength ) ;
 	for ( let y = 0 ; y < this.height ; y ++ ) {
-		this.decodeLineFilter( buffer , y * lineByteLength , ( y + 1 ) * lineByteLength , y > 0 ? ( y - 1 ) * lineByteLength : -1 ) ;
+		this.decodeLineFilter( buffer , y * lineByteLength , ( y + 1 ) * lineByteLength , y > 0 ? ( y - 1 ) * lineByteLength : - 1 ) ;
 		this.extractLine( buffer , y * lineByteLength + 1 , y * imageDataLineByteLength ) ;
 	}
 
@@ -439,13 +615,13 @@ Png.prototype.decodeLineFilter = function( buffer , start , end , lastLineStart 
 	var filterType = buffer[ start ] ;
 	if ( filterType === 0 ) { return ; }	// filter 0 doesn't change anything
 	console.log( "Watch out! FilterType is not 0!" ) ;
-	
+
 	var bytesPerPixel = Math.ceil( this.bitsPerPixels / 8 ) ;
-	
+
 	for ( let i = 0 , imax = end - start ; i < imax ; i ++ ) {
 		/*
 			We use the same byte names than in the PNG spec (https://www.w3.org/TR/png-3/#9Filter-types):
-			
+
 			c b			c: previous byte of the same color channel of the line before		b: byte of the previous line
 			a x			a: previous byte of the same color channel							x: current byte
 		*/
@@ -505,9 +681,9 @@ function paethPredictor( a , b , c ) {
 	if ( pa <= pb && pa <= pc ) { pr = a ; }
 	else if ( pb <= pc ) { pr = b ; }
 	else { pr = c ; }
-	
+
 	return pr ;
-} ;
+}
 
 
 
@@ -547,7 +723,7 @@ const COUNT_BIT_MASK = [
 	0b11111 ,
 	0b111111 ,
 	0b1111111 ,
-	0b11111111 ,
+	0b11111111
 ] ;
 
 const extractBits = ( byte , offset , count ) => ( byte >> ( 8 - offset - count ) ) & COUNT_BIT_MASK[ count ] ;
@@ -570,41 +746,38 @@ Png.prototype.computeBitsPerPixel = function() {
 			this.bitsPerPixel = this.bitDepth * 4 ;
 			break ;
 	}
-	
+
 	this.decodedBytesPerPixel = Math.ceil( this.bitsPerPixel / 8 ) ;
 } ;
 
 
 
-async function deflate( buffer ) {
-	//console.log( "Buffer:" , buffer , buffer.length ) ;
+async function inflate( buffer ) {
 	const decompressionStream = new DecompressionStream( 'deflate' ) ;
 	const blob = new Blob( [ buffer ] ) ;
-	//console.log( "Blob:" , blob , blob.size ) ;
 	const stream = blob.stream().pipeThrough( decompressionStream ) ;
-	//var stream = blob.stream() ;
 	//console.log( "Blob bytes:" , await blob.arrayBuffer() ) ;
 
 	const chunks = [] ;
-	let totalLength = 0 ;
+	for await ( let chunk of stream ) { chunks.push( chunk ) ; }
 
-	for await ( let chunk of stream ) {
-		//console.log( "Chunk:" , chunk ) ;
-		chunks.push( chunk ) ;
-		totalLength += chunk.length ;
-	}
-	
-	const outputBuffer = Buffer.allocUnsafe( totalLength ) ;
+	// Buffer.concat() also accepts Uint8Array
+	return Buffer.concat( chunks ) ;
+}
 
-	let offset = 0 ;
-	for ( let chunk of chunks ) {
-		for ( let byte of chunk ) {
-			outputBuffer[ offset ++ ] = byte ;
-		}
-	}
-	
-	//console.log( "Output:" , outputBuffer ) ;
-	return outputBuffer ;
+
+
+async function deflate( buffer ) {
+	const compressionStream = new CompressionStream( 'deflate' ) ;
+	const blob = new Blob( [ buffer ] ) ;
+	const stream = blob.stream().pipeThrough( compressionStream ) ;
+	//console.log( "Blob bytes:" , await blob.arrayBuffer() ) ;
+
+	const chunks = [] ;
+	for await ( let chunk of stream ) { chunks.push( chunk ) ; }
+
+	// Buffer.concat() also accepts Uint8Array
+	return Buffer.concat( chunks ) ;
 }
 
 
