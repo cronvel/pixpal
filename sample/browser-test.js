@@ -85,6 +85,9 @@ async function test() {
 
 		ctx.restore() ;
 	} , 100 ) ;
+
+	// Trigger a download
+	//setTimeout( () => pixPal.downloadPng( 'my.png' ) , 1000 ) ;
 }
 
 

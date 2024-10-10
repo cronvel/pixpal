@@ -37,7 +37,7 @@ function PixPal( width , height , palette , pixels ) {
 	this.width = width ;
 	this.height = height ;
 	this.palette = [] ;
-	
+
 	if ( Array.isArray( palette ) ) {
 		this.setPalette( palette ) ;
 	}
@@ -67,7 +67,7 @@ PixPal.Png = Png ;
 
 PixPal.prototype.setPalette = function( palette ) {
 	this.palette.length = 0 ;
-	
+
 	for ( let index = 0 ; index < palette.length ; index ++ ) {
 		this.setColor( index , palette[ index ] ) ;
 	}
@@ -76,7 +76,6 @@ PixPal.prototype.setPalette = function( palette ) {
 
 
 const LESSER_BYTE_MASK = 0xff ;
-const HALF_LESSER_BYTE_MASK = 0x0f ;
 
 PixPal.prototype.setColor = function( index , color ) {
 	if ( ! color ) { return ; }
@@ -134,7 +133,7 @@ PixPal.prototype.updateImageData = function( imageData ) {
 	if ( imageData.width !== this.width || imageData.height !== this.height ) {
 		throw new Error( ".updateImageData(): width or height mismatch" ) ;
 	}
-	
+
 	for ( let i = 0 , imax = this.width * this.height ; i < imax ; i ++ ) {
 		let iDest = i * 4 ;
 		let color = this.palette[ this.pixels[ i ] ] ;
@@ -169,6 +168,41 @@ PixPal.fromPng = ( png , options = {} ) => {
 	var pixPal = new PixPal( png.width , png.height , png.palette , png.imageData ) ;
 
 	return pixPal ;
+} ;
+
+
+
+PixPal.prototype.encodePngBuffer = function( options = {} ) {
+	var png = this.toPng( options ) ;
+	return png.encode( options ) ;
+} ;
+
+
+
+PixPal.prototype.savePng = function( url , options = {} ) {
+	var png = this.toPng( options ) ;
+	return png.save( url , options ) ;	// we return for the promise
+} ;
+
+
+
+PixPal.prototype.downloadPng = function( filename , options = {} ) {
+	var png = this.toPng( options ) ;
+	return png.download( filename , options ) ;	// we return for the promise
+} ;
+
+
+
+PixPal.prototype.toPng = function( options = {} ) {
+	var png = Png.createEncoder( {
+		width: this.width ,
+		height: this.height ,
+		colorType: Png.COLOR_TYPE_INDEXED ,
+		palette: this.palette ,
+		imageData: this.pixels
+	} ) ;
+
+	return png ;
 } ;
 
 
@@ -212,6 +246,7 @@ var DecompressionStream = null ;
 var CompressionStream = null ;
 var loadFileAsync = null ;
 var saveFileAsync = null ;
+var download = null ;
 
 if ( process.browser ) {
 	DecompressionStream = window.DecompressionStream ;
@@ -225,7 +260,15 @@ if ( process.browser ) {
 		var buffer = Buffer.from( bytes ) ;
 		return buffer ;
 	} ;
-	saveFileAsync = () => { throw new Error( "Can't save from the web" ) ; } ;
+	saveFileAsync = () => { throw new Error( "Can't save from browser (use .download() instead)" ) ; } ;
+	download = ( filename , buffer ) => {
+		var anchor = window.document.createElement( 'a' ) ;
+		anchor.href = window.URL.createObjectURL( new Blob( [ buffer ] , { type: 'application/octet-stream' } ) ) ;
+		anchor.download = filename ;
+
+		// Force a click to start downloading, even if the anchor is not even appended to the body
+		anchor.click() ;
+	} ;
 }
 else {
 	let require_ = require ;	// this is used to fool Browserfify, so it doesn't try include this in the build
@@ -233,6 +276,7 @@ else {
 	let fs = require_( 'fs' ) ;
 	loadFileAsync = url => fs.promises.readFile( url ) ;
 	saveFileAsync = ( url , data ) => fs.promises.writeFile( url , data ) ;
+	download = () => { throw new Error( "Can't download from non-browser (use .saveFileAsync() instead)" ) ; } ;
 }
 
 
@@ -256,9 +300,14 @@ function Png() {
 	// IDAT
 	this.idatBuffers = [] ;
 
-	// Final
+	// IEND
+	this.iendReceived = false ;
+
+	// Decoder data
 	this.bitsPerPixel = - 1 ;
 	this.decodedBytesPerPixel = - 1 ;
+
+	// Final
 	this.imageData = null ;
 }
 
@@ -266,11 +315,51 @@ module.exports = Png ;
 
 
 
+Png.createEncoder = ( params = {} ) => {
+	var png = new Png() ;
+
+	png.width = + params.width || 0 ;
+	png.height = + params.height || 0 ;
+	png.bitDepth = + params.bitDepth || 8 ;
+	png.colorType = params.colorType ?? Png.COLOR_TYPE_INDEXED ;
+
+	png.compressionMethod = 0 ;
+	png.filterMethod = 0 ;
+	png.interlaceMethod = 0 ;	// unsupported
+
+	if ( Array.isArray( params.palette ) ) { png.palette = params.palette ; }
+
+	if ( params.imageData && ( params.imageData instanceof Uint8ClampedArray ) ) {
+		png.imageData = params.imageData ;
+	}
+
+	return png ;
+} ;
+
+
+
+// PNG constants
+
 Png.COLOR_TYPE_GRAYSCALE = 0 ;
 Png.COLOR_TYPE_RGB = 2 ;
 Png.COLOR_TYPE_INDEXED = 3 ;
 Png.COLOR_TYPE_GRAYSCALE_ALPHA = 4 ;
 Png.COLOR_TYPE_RGBA = 6 ;
+
+
+
+// Chunk/Buffer constants
+
+const CHUNK_META_SIZE = 12 ;
+// A PNG file always starts with this bytes
+const PNG_MAGIC_NUMBERS = [ 0x89 , 0x50 , 0x4E , 0x47 , 0x0D , 0x0A , 0x1A , 0x0A ] ;
+const PNG_MAGIC_NUMBERS_BUFFER = Buffer.from( PNG_MAGIC_NUMBERS ) ;
+const IEND_CHUNK = [	// Instead of triggering the whole chunk machinery, just put this pre-computed IEND chunk
+	0x00 , 0x00 , 0x00 , 0x00 ,		// Zero-length
+	0x49 , 0x45 , 0x4e , 0x44 ,		// IEND
+	0xae , 0x42 , 0x60 , 0x82		// CRC-32 of IEND
+] ;
+const IEND_CHUNK_BUFFER = Buffer.from( IEND_CHUNK ) ;
 
 
 
@@ -289,9 +378,67 @@ Png.decode = async function( buffer , options = {} ) {
 
 
 
+// Sadly it should be async, because browser's Compression API works with streams
+Png.prototype.decode = async function( buffer , options = {} ) {
+	var offset = 0 ;
+
+	// Magic numbers
+	for ( ; offset < PNG_MAGIC_NUMBERS.length ; offset ++ ) {
+		if ( buffer[ offset ] !== PNG_MAGIC_NUMBERS[ offset ] ) {
+			throw new Error( "Not a PNG, it doesn't start with PNG magic numbers" ) ;
+		}
+	}
+
+	this.palette.length = 0 ;
+	this.imageData = null ;
+
+	// Chunk reading
+	while ( offset < buffer.length ) {
+		if ( this.iendReceived ) {
+			throw new Error( "Bad PNG, chunk after IEND" ) ;
+		}
+
+		let chunkSize = buffer.readUInt32BE( offset ) ;
+		let chunkType = buffer.toString( 'latin1' , offset + 4 , offset + 8 ) ;
+		let chunkCrc32 = buffer.readInt32BE( offset + 8 + chunkSize ) ;
+
+		console.log( "Found chunk: '" + chunkType + "' of size: " + chunkSize + " and CRC-32: " + chunkCrc32 ) ;
+
+		if ( chunkDecoders[ chunkType ] ) {
+			// Node.js buffer.slice() create a view, be careful because TypedArray.slice() create a copy!
+
+			if ( options.crc32 ) {
+				let chunkComputedCrc32 = crc32.buf( buffer.slice( offset + 4 , offset + 8 + chunkSize ) , 0 ) ;
+				if ( chunkComputedCrc32 !== chunkCrc32 ) {
+					throw new Error( "Bad CRC-32 for chunk '" + chunkType + "', expecting: " + chunkCrc32 + " but got: " + chunkComputedCrc32  ) ;
+				}
+			}
+
+			chunkDecoders[ chunkType ].call( this , buffer.slice( offset + 8 , offset + 8 + chunkSize ) , options ) ;
+		}
+
+		offset += chunkSize + 12 ;
+	}
+
+	if ( ! this.iendReceived ) {
+		throw new Error( "Bad PNG, no IEND chunk received" ) ;
+	}
+
+	await this.generateImageData() ;
+} ;
+
+
+
 Png.prototype.save = async function( url , options = {} ) {
-	var buffer = this.encode( options ) ;
+	var buffer = await this.encode( options ) ;
 	await saveFileAsync( url , buffer ) ;
+} ;
+
+
+
+Png.prototype.download = async function( filename , options = {} ) {
+	var buffer = await this.encode( options ) ;
+	await download( filename , buffer ) ;
 } ;
 
 
@@ -300,23 +447,27 @@ Png.prototype.encode = async function( options = {} ) {
 	var chunks = [] ;
 
 	// Add magic numbers
-	chunks.push( Buffer.from( PNG_MAGIC_NUMBERS ) ) ;
+	chunks.push( PNG_MAGIC_NUMBERS_BUFFER ) ;
 
 	// IHDR: image header
-	this.addChunk( chunks , 'IHDR' , options ) ;
+	await this.addChunk( chunks , 'IHDR' , options ) ;
 
 	// PLTE: the palette for indexed PNG
-	this.addChunk( chunks , 'PLTE' , options ) ;
+	await this.addChunk( chunks , 'PLTE' , options ) ;
 
 	// tRNS: the color indexes for transparency
-	this.addChunk( chunks , 'tRNS' , options ) ;
+	await this.addChunk( chunks , 'tRNS' , options ) ;
 
 	// bKGD: the default background color
-	this.addChunk( chunks , 'bKGD' , options ) ;
+	await this.addChunk( chunks , 'bKGD' , options ) ;
 
 	// IDAT: the image pixel data
-	this.addChunk( chunks , 'IDAT' , options ) ;
+	await this.addChunk( chunks , 'IDAT' , options ) ;
 
+	// Finalize by sending the IEND chunk to end the file
+	chunks.push( IEND_CHUNK_BUFFER ) ;
+
+	console.log( "Chunks:" , chunks ) ;
 	return Buffer.concat( chunks ) ;
 } ;
 
@@ -353,55 +504,6 @@ Png.prototype.generateChunkFromData = function( chunkType , dataBuffer ) {
 
 
 
-// A PNG file always starts with this bytes
-const PNG_MAGIC_NUMBERS = [ 0x89 , 0x50 , 0x4E , 0x47 , 0x0D , 0x0A , 0x1A , 0x0A ] ;
-const CHUNK_META_SIZE = 12 ;
-
-
-
-// Sadly it should be async, because browser's Compression API works with streams
-Png.prototype.decode = async function( buffer , options = {} ) {
-	var offset = 0 ;
-
-	// Magic numbers
-	for ( ; offset < PNG_MAGIC_NUMBERS.length ; offset ++ ) {
-		if ( buffer[ offset ] !== PNG_MAGIC_NUMBERS[ offset ] ) {
-			throw new Error( "Not a PNG, it doesn't start with PNG magic numbers" ) ;
-		}
-	}
-
-	this.palette.length = 0 ;
-	this.imageData = null ;
-
-	// Chunk reading
-	while ( offset < buffer.length ) {
-		let chunkSize = buffer.readUInt32BE( offset ) ;
-		let chunkType = buffer.toString( 'latin1' , offset + 4 , offset + 8 ) ;
-		let chunkCrc32 = buffer.readInt32BE( offset + 8 + chunkSize ) ;
-
-		console.log( "Found chunk: '" + chunkType + "' of size: " + chunkSize + " and CRC-32: " + chunkCrc32 ) ;
-
-		if ( chunkDecoders[ chunkType ] ) {
-			// Node.js buffer.slice() create a view, be careful because TypedArray.slice() create a copy!
-
-			if ( options.crc32 ) {
-				let chunkComputedCrc32 = crc32.buf( buffer.slice( offset + 4 , offset + 8 + chunkSize ) , 0 ) ;
-				if ( chunkComputedCrc32 !== chunkCrc32 ) {
-					throw new Error( "Bad CRC-32 for chunk '" + chunkType + "', expecting: " + chunkCrc32 + " but got: " + chunkComputedCrc32  ) ;
-				}
-			}
-
-			chunkDecoders[ chunkType ].call( this , buffer.slice( offset + 8 , offset + 8 + chunkSize ) , options ) ;
-		}
-
-		offset += chunkSize + 12 ;
-	}
-
-	await this.generateImageData() ;
-} ;
-
-
-
 const chunkDecoders = {} ;
 const chunkEncoders = {} ;
 
@@ -424,7 +526,7 @@ chunkDecoders.IHDR = function( buffer , options ) {
 
 
 chunkEncoders.IHDR = function( options ) {
-	let buffer = new Buffer.allocUnsafe( 13 ) ;
+	let buffer = Buffer.allocUnsafe( 13 ) ;
 	let offset = 0 ;
 
 	buffer.writeUInt32BE( this.width , offset ) ; offset += 4 ;
@@ -465,7 +567,7 @@ chunkEncoders.PLTE = function( options ) {
 	if ( this.colorType !== Png.COLOR_TYPE_INDEXED ) { return ; }
 	//if ( ! this.palette.length ) { return ; }
 
-	let buffer = new Buffer.allocUnsafe( this.palette.length * 3 ) ;
+	let buffer = Buffer.allocUnsafe( this.palette.length * 3 ) ;
 
 	for ( let index = 0 , offset = 0 ; index < this.palette.length ; index ++ , offset += 3 ) {
 		let color = this.palette[ index ] ;
@@ -504,7 +606,7 @@ chunkEncoders.tRNS = function( options ) {
 
 	if ( ! transparentIndexes.length ) { return ; }
 
-	return Buffer.from( transparentIndexes.length ) ;
+	return Buffer.from( transparentIndexes ) ;
 } ;
 
 
@@ -524,7 +626,7 @@ chunkDecoders.bKGD = function( buffer , options ) {
 chunkEncoders.bKGD = function( options ) {
 	if ( this.colorType !== Png.COLOR_TYPE_INDEXED || this.backgroundColorIndex < 0 ) { return ; }
 
-	let buffer = new Buffer.allocUnsafe( 1 ) ;
+	let buffer = Buffer.allocUnsafe( 1 ) ;
 	buffer.writeUInt8( this.backgroundColorIndex , 0 ) ;
 	return buffer ;
 } ;
@@ -558,21 +660,34 @@ chunkEncoders.IDAT = async function( options ) {
 
 	// Prepare the PNG buffer, using only filter 0 and no Adam7, we just want it to work
 	for ( let y = 0 ; y < this.height ; y ++ ) {
-		offset = y * lineByteLength ;
-		
+		let offset = y * lineByteLength ;
+
 		// We don't care for filters ATM, it requires heuristic, it's boring to do...
 		idatBuffer.writeUInt8( 0 , offset ) ;
-		
+
 		// Boring, Buffer has no .copyFrom(), and this.imageData is a UInt8ClampedArray...
 		for ( let x = 0 ; x < this.width ; x ++ ) {
-			idatBuffer.writeUInt8( this.imageData[ y * width + x ] , offset + 1 + x ) ;
+			idatBuffer.writeUInt8( this.imageData[ y * this.width + x ] , offset + 1 + x ) ;
 		}
 	}
-	
+
 	var compressedBuffer = await deflate( idatBuffer ) ;
 	console.log( "Compressed IDAT:" , compressedBuffer , compressedBuffer.length ) ;
 
 	return compressedBuffer ;
+} ;
+
+
+
+chunkDecoders.IEND = function() {
+	this.iendReceived = true ;
+	console.log( "IEND" ) ;
+} ;
+
+
+
+chunkEncoders.IEND = function() {
+	return Buffer.allocUnsafe( 0 ) ;
 } ;
 
 
