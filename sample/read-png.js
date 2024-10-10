@@ -25,7 +25,7 @@ async function test() {
 		// TMP: force bitDepth
 		png.bitDepth = 8 ;
 		
-		console.log( "\n\n### SAVING!" , png ) ;
+		console.log( "\n\n### SAVING!" , png , "\n\n\n" ) ;
 		png.save( outputFile ) ;
 	}
 	else {
