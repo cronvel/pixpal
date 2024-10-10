@@ -21,7 +21,11 @@ var outputFile = process.argv[ 3 ] ?? null ;
 async function test() {
 	if ( outputFile ) {
 		let png = await PixPal.Png.load( sourceFile , { crc32: true } ) ;
-		console.log( "\n\n### SAVING!" ) ;
+		
+		// TMP: force bitDepth
+		png.bitDepth = 8 ;
+		
+		console.log( "\n\n### SAVING!" , png ) ;
 		png.save( outputFile ) ;
 	}
 	else {
