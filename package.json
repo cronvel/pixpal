@@ -1,6 +1,6 @@
 {
   "name": "pixpal",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Indexed image format for palette manipulation.",
   "main": "lib/PixPal.js",
   "directories": {
@@ -20,7 +20,8 @@
     "image",
     "palette",
     "8-bit",
-    "indexed"
+    "indexed",
+    "png"
   ],
   "author": "Cédric Ronvel",
   "license": "MIT",

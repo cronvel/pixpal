@@ -79,7 +79,6 @@ const LESSER_BYTE_MASK = 0xff ;
 
 PixPal.prototype.setColor = function( index , color ) {
 	if ( ! color ) { return ; }
-	//console.warn( "setColor:" , index , color ) ;
 
 	var currentColor = this.palette[ index ] ;
 	if ( ! currentColor ) { currentColor = this.palette[ index ] = [] ; }
@@ -252,7 +251,7 @@ if ( process.browser ) {
 	DecompressionStream = window.DecompressionStream ;
 	CompressionStream = window.CompressionStream ;
 	loadFileAsync = async ( url ) => {
-		var response = await fetch( 'tiny.png' ) ;
+		var response = await fetch( url ) ;
 		if ( ! response.ok ) {
 			throw new Error( "Can't retrieve file: '" + url + "', " + response.status + " - " + response.statusText ) ;
 		}

@@ -33,6 +33,8 @@ async function test() {
 	var ctx = $canvas.getContext( '2d' ) ;
 
 	var pixPal = await PixPal.loadPng( 'tiny.png' , { crc32: true } ) ;
+	//var pixPal = await PixPal.loadPng( 'crappy.png' , { crc32: true } ) ;
+	//var pixPal = await PixPal.loadPng( 'out.png' , { crc32: true } ) ;
 	console.log( pixPal ) ;
 
 	//ctx.fillStyle = "green"; ctx.fillRect(0, 0, 100, 100);
@@ -65,6 +67,9 @@ async function test() {
 			'#ff000020',
 		] ;
 
+	var scaleRate = 30 ;
+	//var scaleRate = 1 ;
+
 	setInterval( async () => {
 		let imageBitmap = await createImageBitmap( imageData ) ;
 
@@ -74,7 +79,7 @@ async function test() {
 
 		ctx.fillStyle = "green"; ctx.fillRect(0, 0, $canvas.width, $canvas.height);
 		ctx.save() ;
-		ctx.scale( 30 , 30 ) ;
+		ctx.scale( scaleRate , scaleRate ) ;
 		
 		// .putImageData() doesn't support scaling, it is supposed to be raw data access to a canvas
 		//ctx.putImageData( imageData , 0 , 0 ) ;
