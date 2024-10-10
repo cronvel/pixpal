@@ -53,7 +53,7 @@ UGLIFY=uglifyjs
 
 # Build the browser lib
 browser/PixPal.js: lib/*.js
-	${BROWSERIFY} lib/PixPal.js -i fs -i image-size -s svgKit -o browser/PixPal.js
+	${BROWSERIFY} lib/PixPal.js -i fs -i image-size -s PixPal -o browser/PixPal.js
 
 # Build the browser minified lib
 browser/PixPal.min.js: browser/PixPal.js

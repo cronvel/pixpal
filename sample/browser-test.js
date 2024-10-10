@@ -29,10 +29,74 @@
 
 
 async function test() {
+	var $canvas = document.getElementById( 'canvas' ) ;
+	var ctx = $canvas.getContext( '2d' ) ;
+
+	var pixPal = await PixPal.loadPng( 'tiny.png' , { crc32: true } ) ;
+	console.log( pixPal ) ;
+
+	//ctx.fillStyle = "green"; ctx.fillRect(0, 0, 100, 100);
+
+	var imageData = pixPal.createImageData() ;
+	ctx.putImageData( imageData , 0 , 0 ) ;
 	
+	var colorRotationIndex = 0 ,
+		colorRotation = [
+			[255,0,0],
+			[255,127,0],
+			[255,255,0],
+			[127,255,0],
+			[0,255,0],
+			[0,255,127],
+			[0,255,255],
+			[0,127,255],
+			[0,0,255],
+			[127,0,255],
+			[255,0,255],
+			[255,0,127],
+			'#f00',
+			'#ff0000',
+			'#ff0000e0',
+			'#ff0000c0',
+			'#ff0000a0',
+			'#ff000080',
+			'#ff000060',
+			'#ff000040',
+			'#ff000020',
+		] ;
+
+	setInterval( async () => {
+		let imageBitmap = await createImageBitmap( imageData ) ;
+
+		colorRotationIndex = ( colorRotationIndex + 1 ) % colorRotation.length ;
+		pixPal.setColor( 2 , colorRotation[ colorRotationIndex ] ) ;
+		pixPal.updateImageData( imageData ) ;
+
+		ctx.fillStyle = "green"; ctx.fillRect(0, 0, $canvas.width, $canvas.height);
+		ctx.save() ;
+		ctx.scale( 30 , 30 ) ;
+		
+		// .putImageData() doesn't support scaling, it is supposed to be raw data access to a canvas
+		//ctx.putImageData( imageData , 0 , 0 ) ;
+
+		// .drawImage() support scaling, but don't support ImageData, it should be an ImageBitmap
+		ctx.imageSmoothingEnabled = false ;		// For pixel art, this is mandatory if we don't want the pixels to be blurred away
+		ctx.drawImage( imageBitmap , 0 , 0 ) ;
+
+		ctx.restore() ;
+	} , 100 ) ;
 }
 
 
+// Like jQuery's $(document).ready()
+const ready = callback => {
+    document.addEventListener( 'DOMContentLoaded' , function internalCallback() {
+        document.removeEventListener( 'DOMContentLoaded' , internalCallback , false ) ;
+        callback() ;
+    } , false ) ;
+} ;
 
 
-test() ;
+
+ready( test ) ;
+
