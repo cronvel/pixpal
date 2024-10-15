@@ -434,7 +434,7 @@ Png.prototype.decode = async function( buffer , options = {} ) {
 	var readableBuffer = new SequentialReadBuffer( buffer ) ;
 	
 	// Magic numbers
-	for ( let i ; i < PNG_MAGIC_NUMBERS.length ; i ++ ) {
+	for ( let i = 0 ; i < PNG_MAGIC_NUMBERS.length ; i ++ ) {
 		if ( PNG_MAGIC_NUMBERS[ i ] !== readableBuffer.readUInt8() ) {
 			throw new Error( "Not a PNG, it doesn't start with PNG magic numbers" ) ;
 		}
@@ -444,31 +444,35 @@ Png.prototype.decode = async function( buffer , options = {} ) {
 	this.imageData = null ;
 
 	// Chunk reading
-	while ( ! readableBuffer.ended() ) {
+	while ( ! readableBuffer.ended ) {
 		if ( this.iendReceived ) {
 			throw new Error( "Bad PNG, chunk after IEND" ) ;
 		}
 
 		let chunkSize = readableBuffer.readUInt32BE() ;
-		let chunkType = readableBuffer.toString( 'latin1' , offset + 4 , offset + 8 ) ;
-		let chunkCrc32 = readableBuffer.readInt32BE( offset + 8 + chunkSize ) ;
+		let chunkType = readableBuffer.readUtf8( 4 ) ;
+		//let chunkType = readableBuffer.readString( 4 , 'latin1' ) ;
 
-		console.log( "Found chunk: '" + chunkType + "' of size: " + chunkSize + " and CRC-32: " + chunkCrc32 ) ;
+		console.log( "Found chunk: '" + chunkType + "' of size: " + chunkSize ) ;
 
 		if ( chunkDecoders[ chunkType ] ) {
-			// Node.js buffer.slice() create a view, be careful because TypedArray.slice() create a copy!
+			let chunkBuffer = readableBuffer.readBuffer( chunkSize , true ) ;
+			let chunkCrc32 = readableBuffer.readInt32BE() ;
 
 			if ( options.crc32 ) {
-				let chunkComputedCrc32 = crc32.buf( buffer.slice( offset + 4 , offset + 8 + chunkSize ) , 0 ) ;
+				let chunkComputedCrc32 = crc32.buf( chunkBuffer , crc32.bstr( chunkType ) ) ;
 				if ( chunkComputedCrc32 !== chunkCrc32 ) {
 					throw new Error( "Bad CRC-32 for chunk '" + chunkType + "', expecting: " + chunkCrc32 + " but got: " + chunkComputedCrc32  ) ;
 				}
+				//else { console.log( "  CRC-32 match: '" + chunkCrc32 + "' = '" + chunkComputedCrc32 + "'" ) ; }
 			}
 
-			chunkDecoders[ chunkType ].call( this , buffer.slice( offset + 8 , offset + 8 + chunkSize ) , options ) ;
+			chunkDecoders[ chunkType ].call( this , new SequentialReadBuffer( chunkBuffer ) , options ) ;
 		}
-
-		offset += chunkSize + 12 ;
+		else {
+			// Skip the chunk and its CRC
+			readableBuffer.skip( chunkSize + 4 ) ;
+		}
 	}
 
 	if ( ! this.iendReceived ) {
@@ -558,16 +562,14 @@ Png.prototype.generateChunkFromData = function( chunkType , dataBuffer ) {
 const chunkDecoders = {} ;
 const chunkEncoders = {} ;
 
-chunkDecoders.IHDR = function( buffer , options ) {
-	let offset = 0 ;
-
-	this.width = buffer.readUInt32BE( offset ) ; offset += 4 ;
-	this.height = buffer.readUInt32BE( offset ) ; offset += 4 ;
-	this.bitDepth = buffer.readUInt8( offset ) ; offset ++ ;
-	this.colorType = buffer.readUInt8( offset ) ; offset ++ ;
-	this.compressionMethod = buffer.readUInt8( offset ) ; offset ++ ;
-	this.filterMethod = buffer.readUInt8( offset ) ; offset ++ ;
-	this.interlaceMethod = buffer.readUInt8( offset ) ; offset ++ ;
+chunkDecoders.IHDR = function( readableBuffer , options ) {
+	this.width = readableBuffer.readUInt32BE() ;
+	this.height = readableBuffer.readUInt32BE() ;
+	this.bitDepth = readableBuffer.readUInt8() ;
+	this.colorType = readableBuffer.readUInt8() ;
+	this.compressionMethod = readableBuffer.readUInt8() ;
+	this.filterMethod = readableBuffer.readUInt8() ;
+	this.interlaceMethod = readableBuffer.readUInt8() ;
 
 	this.computeBitsPerPixel() ;
 
@@ -593,18 +595,20 @@ chunkEncoders.IHDR = function( options ) {
 
 
 
-chunkDecoders.PLTE = function( buffer , options ) {
+chunkDecoders.PLTE = function( readableBuffer , options ) {
 	if ( this.colorType !== Png.COLOR_TYPE_INDEXED ) {
 		throw new Error( "Unsupported color type for PLTE: " + this.colorType ) ;
 	}
 
 	this.palette.length = 0 ;
 
-	for ( let index = 0 , offset = 0 ; offset < buffer.length ; index ++ , offset += 3 ) {
-		this.palette[ index ] = [
-			buffer.readUInt8( offset ) ,
-			buffer.readUInt8( offset + 1 ) ,
-			buffer.readUInt8( offset + 2 ) ,
+	let index = 0 ;
+
+	while ( ! readableBuffer.ended ) {
+		this.palette[ index ++ ] = [
+			readableBuffer.readUInt8() ,
+			readableBuffer.readUInt8() ,
+			readableBuffer.readUInt8() ,
 			255
 		] ;
 	}
@@ -632,13 +636,15 @@ chunkEncoders.PLTE = function( options ) {
 
 
 
-chunkDecoders.tRNS = function( buffer , options ) {
+chunkDecoders.tRNS = function( readableBuffer , options ) {
 	if ( this.colorType !== Png.COLOR_TYPE_INDEXED ) {
 		throw new Error( "Unsupported color type for tRNS: " + this.colorType ) ;
 	}
 
-	for ( let index = 0 , imax = Math.min( this.palette.length , buffer.length ) ; index < imax ; index ++ ) {
-		this.palette[ index ][ 3 ] = buffer.readUInt8( index ) ;
+	let index = 0 ;
+
+	while ( ! readableBuffer.ended && index < this.palette.length ) {
+		this.palette[ index ++ ][ 3 ] = readableBuffer.readUInt8() ;
 	}
 
 	console.log( "tRNS:" , this.palette ) ;
@@ -662,12 +668,12 @@ chunkEncoders.tRNS = function( options ) {
 
 
 
-chunkDecoders.bKGD = function( buffer , options ) {
+chunkDecoders.bKGD = function( readableBuffer , options ) {
 	if ( this.colorType !== Png.COLOR_TYPE_INDEXED ) {
 		throw new Error( "Unsupported color type for bKGD: " + this.colorType ) ;
 	}
 
-	this.backgroundColorIndex = buffer.readUInt8( 0 ) ;
+	this.backgroundColorIndex = readableBuffer.readUInt8() ;
 
 	console.log( "bKGD:" , this.backgroundColorIndex ) ;
 } ;
@@ -684,9 +690,9 @@ chunkEncoders.bKGD = function( options ) {
 
 
 
-chunkDecoders.IDAT = function( buffer , options ) {
-	this.idatBuffers.push( buffer ) ;
-	console.log( "Raw IDAT:" , buffer , buffer.length ) ;
+chunkDecoders.IDAT = function( readableBuffer , options ) {
+	this.idatBuffers.push( readableBuffer.buffer ) ;
+	console.log( "Raw IDAT:" , readableBuffer.buffer , readableBuffer.buffer.length ) ;
 } ;
 
 
@@ -1114,15 +1120,38 @@ module.exports = SequentialReadBuffer ;
 
 
 
-SequentialReadBuffer.prototype.ended = function() { return this.ptr >= this.buffer.length ; } ;
-SequentialReadBuffer.prototype.remainingBytes = function() { return this.buffer.length - this.ptr ; } ;
+// Getters
+Object.defineProperties( SequentialReadBuffer.prototype , {
+	ended: {
+		get: function() { return this.ptr >= this.buffer.length ; }
+	} ,
+	remainingBytes: {
+		get: function() { return this.buffer.length - this.ptr ; }
+	}
+} ) ;
 
 
 
-SequentialReadBuffer.prototype.readBuffer = function( byteLength ) {
+// Skip some bytes we don't have interest in
+SequentialReadBuffer.prototype.skip = function( byteLength ) {
 	this.remainingBits = this.currentBitByte = 0 ;
-	var buffer = Buffer.allocUnsafe( byteLength ) ;
-	this.buffer.copy( buffer , 0 , this.ptr , this.ptr + byteLength ) ;
+	this.ptr += byteLength ;
+} ;
+
+
+
+SequentialReadBuffer.prototype.readBuffer = function( byteLength , view = false ) {
+	this.remainingBits = this.currentBitByte = 0 ;
+	var buffer ;
+
+	if ( view ) {
+		buffer = this.buffer.slice( this.ptr , this.ptr + byteLength ) ;
+	}
+	else {
+		buffer = Buffer.allocUnsafe( byteLength ) ;
+		this.buffer.copy( buffer , 0 , this.ptr , this.ptr + byteLength ) ;
+	}
+
 	this.ptr += byteLength ;
 	return buffer ;
 } ;
@@ -1280,52 +1309,64 @@ SequentialReadBuffer.prototype.readInt64LE = function() {
 
 
 
-SequentialReadBuffer.prototype.readUtf8 = function( byteLength ) {
+SequentialReadBuffer.prototype.readString = function( byteLength , encoding = 'latin1' ) {
 	this.remainingBits = this.currentBitByte = 0 ;
-	var v = this.buffer.toString( 'utf8' , this.ptr , this.ptr + byteLength ) ;
+	var v = this.buffer.toString( encoding , this.ptr , this.ptr + byteLength ) ;
 	this.ptr += byteLength ;
 	return v ;
 } ;
+
+SequentialReadBuffer.prototype.readUtf8 = function( byteLength ) { return this.readString( byteLength , 'utf8' ) ; } ;
 
 
 
 // LPS: Length Prefixed String.
 // Read the UTF8 BYTE LENGTH using an UInt8.
-SequentialReadBuffer.prototype.readLps8Utf8 = function() {
+SequentialReadBuffer.prototype.readLps8String = function( encoding = 'latin1' ) {
 	// Read the LPS
 	var byteLength = this.readUInt8() ;
-	return this.readUtf8( byteLength ) ;
+	return this.readString( byteLength , encoding ) ;
 } ;
 
+SequentialReadBuffer.prototype.readLps8Utf8 = function() { return this.readLps8String( 'utf8' ) ; } ;
 
 
-SequentialReadBuffer.prototype.readLps16Utf8 =
-SequentialReadBuffer.prototype.readLps16BEUtf8 = function() {
+
+SequentialReadBuffer.prototype.readLps16String =
+SequentialReadBuffer.prototype.readLps16BEString = function( encoding = 'latin1' ) {
 	// Read the LPS
 	var byteLength = this.readUInt16() ;
-	return this.readUtf8( byteLength ) ;
+	return this.readString( byteLength , encoding ) ;
 } ;
 
-SequentialReadBuffer.prototype.readLps16LEUtf8 = function() {
+SequentialReadBuffer.prototype.readLps16Utf8 = SequentialReadBuffer.prototype.readLps16BEUtf8 = function() { return this.readLps16String( 'utf8' ) ; } ;
+
+SequentialReadBuffer.prototype.readLps16LEString = function( encoding = 'latin1' ) {
 	// Read the LPS
 	var byteLength = this.readUInt16LE() ;
-	return this.readUtf8( byteLength ) ;
+	return this.readString( byteLength , encoding ) ;
 } ;
 
+SequentialReadBuffer.prototype.readLps16LEString = function() { return this.readLps16LEString( 'utf8' ) ; } ;
 
 
-SequentialReadBuffer.prototype.readLps32Utf8 =
-SequentialReadBuffer.prototype.readLps32BEUtf8 = function() {
+
+SequentialReadBuffer.prototype.readLps32String =
+SequentialReadBuffer.prototype.readLps32BEString = function( encoding = 'latin1' ) {
 	// Read the LPS
 	var byteLength = this.readUInt32() ;
-	return this.readUtf8( byteLength ) ;
+	return this.readString( byteLength , encoding ) ;
 } ;
 
-SequentialReadBuffer.prototype.readLps32LEUtf8 = function() {
+SequentialReadBuffer.prototype.readLps32Utf8 = SequentialReadBuffer.prototype.readLps32BEUtf8 = function() { return this.readLps32String( 'utf8' ) ; } ;
+
+SequentialReadBuffer.prototype.readLps32LEString = function( encoding = 'latin1' ) {
 	// Read the LPS
 	var byteLength = this.readUInt32LE() ;
-	return this.readUtf8( byteLength ) ;
+	return this.readString( byteLength , encoding ) ;
 } ;
+
+SequentialReadBuffer.prototype.readLps32LEString = function() { return this.readLps32LEString( 'utf8' ) ; } ;
 
 
 
