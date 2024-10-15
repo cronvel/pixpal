@@ -19,6 +19,9 @@ var outputFile = process.argv[ 3 ] ?? null ;
 
 
 async function test_() {
+	let png = await PixPal.Png.load( sourceFile , { crc32: true } ) ;
+	return ;
+
 	if ( outputFile ) {
 		let png = await PixPal.Png.load( sourceFile , { crc32: true } ) ;
 		
@@ -40,5 +43,5 @@ async function test() {
 	}
 }
 
-test() ;
+test_() ;
 

@@ -130,7 +130,7 @@ PixPal.prototype.createImageData = function() {
 
 PixPal.prototype.updateImageData = function( imageData ) {
 	if ( imageData.width !== this.width || imageData.height !== this.height ) {
-		throw new Error( ".updateImageData(): width or height mismatch" ) ;
+		throw new Error( ".updateImageData(): width and/or height mismatch" ) ;
 	}
 
 	for ( let i = 0 , imax = this.width * this.height ; i < imax ; i ++ ) {
@@ -141,6 +141,53 @@ PixPal.prototype.updateImageData = function( imageData ) {
 		imageData.data[ iDest + 2 ] = color[ 2 ] ;	// Blue
 		imageData.data[ iDest + 3 ] = color[ 3 ] ;	// Alpha
 	}
+} ;
+
+
+
+// Convert RGBA to indexed
+PixPal.fromPng = ( imageData , options = {} ) => {
+	var pixPal = new PixPal( imageData.width , imageData.height , options.palette ) ;
+	pixPal.updateFromImageData
+	return pixPal ;
+} ;
+
+
+
+// Convert RGBA to indexed
+PixPal.updateFromImageData = function( imageData , options = {} ) {
+	if ( imageData.width !== this.width || imageData.height !== this.height ) {
+		throw new Error( ".updateFromImageData(): width and/or height mismatch" ) ;
+	}
+
+	for ( let i = 0 , imax = this.width * this.height ; i < imax ; i ++ ) {
+		let iSource = i * 4 ;
+
+		let colorIndex = this.getClosestColor(
+			imageData.data[ iDest ] ,		// red
+			imageData.data[ iDest + 1 ] ,	// green
+			imageData.data[ iDest + 2 ] ,	// blue
+			imageData.data[ iDest + 3 ]		// alpha
+		) ;
+
+		if ( colorIndex === -1 ) {
+			// Not found, fallback to zero
+			this.pixels[ i ] = 0 ;
+		}
+		else {
+			this.pixels[ i ] = colorIndex ;
+		}
+	}
+
+	return pixPal ;
+} ;
+
+
+
+// Argument mode will be used to choose to compute distance in RGB or Lch.
+// Only RGB is supported for instance.
+PixPal.prototype.getClosestColor = ( r , g , b , a , mode = 'rgb' ) => {
+	
 } ;
 
 
@@ -237,6 +284,7 @@ PixPal.prototype.toPng = function( options = {} ) {
 
 
 
+const SequentialReadBuffer = require( 'stream-kit/lib/SequentialReadBuffer.js' ) ;
 const crc32 = require( 'crc-32' ) ;
 
 
@@ -270,7 +318,7 @@ if ( process.browser ) {
 	} ;
 }
 else {
-	let require_ = require ;	// this is used to fool Browserfify, so it doesn't try include this in the build
+	let require_ = require ;	// this is used to fool Browserfify, so it doesn't try to include this in the build
 	( { DecompressionStream , CompressionStream } = require_( 'stream/web' ) ) ;
 	let fs = require_( 'fs' ) ;
 	loadFileAsync = url => fs.promises.readFile( url ) ;
@@ -303,8 +351,12 @@ function Png() {
 	this.iendReceived = false ;
 
 	// Decoder data
+	//this.readableBuffer = null ;
 	this.bitsPerPixel = - 1 ;
 	this.decodedBytesPerPixel = - 1 ;
+
+	// Encoder data
+	//this.writableBuffer = null ;
 
 	// Final
 	this.imageData = null ;
@@ -379,11 +431,11 @@ Png.decode = async function( buffer , options = {} ) {
 
 // Sadly it should be async, because browser's Compression API works with streams
 Png.prototype.decode = async function( buffer , options = {} ) {
-	var offset = 0 ;
-
+	var readableBuffer = new SequentialReadBuffer( buffer ) ;
+	
 	// Magic numbers
-	for ( ; offset < PNG_MAGIC_NUMBERS.length ; offset ++ ) {
-		if ( buffer[ offset ] !== PNG_MAGIC_NUMBERS[ offset ] ) {
+	for ( let i ; i < PNG_MAGIC_NUMBERS.length ; i ++ ) {
+		if ( PNG_MAGIC_NUMBERS[ i ] !== readableBuffer.readUInt8() ) {
 			throw new Error( "Not a PNG, it doesn't start with PNG magic numbers" ) ;
 		}
 	}
@@ -392,14 +444,14 @@ Png.prototype.decode = async function( buffer , options = {} ) {
 	this.imageData = null ;
 
 	// Chunk reading
-	while ( offset < buffer.length ) {
+	while ( ! readableBuffer.ended() ) {
 		if ( this.iendReceived ) {
 			throw new Error( "Bad PNG, chunk after IEND" ) ;
 		}
 
-		let chunkSize = buffer.readUInt32BE( offset ) ;
-		let chunkType = buffer.toString( 'latin1' , offset + 4 , offset + 8 ) ;
-		let chunkCrc32 = buffer.readInt32BE( offset + 8 + chunkSize ) ;
+		let chunkSize = readableBuffer.readUInt32BE() ;
+		let chunkType = readableBuffer.toString( 'latin1' , offset + 4 , offset + 8 ) ;
+		let chunkCrc32 = readableBuffer.readInt32BE( offset + 8 + chunkSize ) ;
 
 		console.log( "Found chunk: '" + chunkType + "' of size: " + chunkSize + " and CRC-32: " + chunkCrc32 ) ;
 
@@ -896,7 +948,7 @@ async function deflate( buffer ) {
 
 
 }).call(this)}).call(this,require('_process'),require("buffer").Buffer)
-},{"_process":7,"buffer":5,"crc-32":3}],3:[function(require,module,exports){
+},{"_process":8,"buffer":6,"crc-32":3,"stream-kit/lib/SequentialReadBuffer.js":4}],3:[function(require,module,exports){
 /*! crc32.js (C) 2014-present SheetJS -- http://sheetjs.com */
 /* vim: set ts=2: */
 /*exported CRC32 */
@@ -1014,6 +1066,355 @@ CRC32.str = crc32_str;
 }));
 
 },{}],4:[function(require,module,exports){
+(function (Buffer){(function (){
+/*
+	Stream Kit
+
+	Copyright (c) 2016 - 2024 Cédric Ronvel
+
+	The MIT License (MIT)
+
+	Permission is hereby granted, free of charge, to any person obtaining a copy
+	of this software and associated documentation files (the "Software"), to deal
+	in the Software without restriction, including without limitation the rights
+	to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+	copies of the Software, and to permit persons to whom the Software is
+	furnished to do so, subject to the following conditions:
+
+	The above copyright notice and this permission notice shall be included in all
+	copies or substantial portions of the Software.
+
+	THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+	IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+	FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+	AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+	LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+	OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+	SOFTWARE.
+*/
+
+"use strict" ;
+
+
+
+// Bring all the good stuffs of StreamBuffer to regular buffer.
+
+
+
+function SequentialReadBuffer( buffer ) {
+	this.buffer = buffer ;
+	this.ptr = 0 ;
+
+	// Bit reading part
+	this.currentBitByte = 0 ;       // current byte where to extract bits
+	this.remainingBits = 0 ;    // remaining bits inside the current byte, if 0 there is no byte where to extract bits
+}
+
+module.exports = SequentialReadBuffer ;
+
+
+
+SequentialReadBuffer.prototype.ended = function() { return this.ptr >= this.buffer.length ; } ;
+SequentialReadBuffer.prototype.remainingBytes = function() { return this.buffer.length - this.ptr ; } ;
+
+
+
+SequentialReadBuffer.prototype.readBuffer = function( byteLength ) {
+	this.remainingBits = this.currentBitByte = 0 ;
+	var buffer = Buffer.allocUnsafe( byteLength ) ;
+	this.buffer.copy( buffer , 0 , this.ptr , this.ptr + byteLength ) ;
+	this.ptr += byteLength ;
+	return buffer ;
+} ;
+
+
+
+SequentialReadBuffer.prototype.readFloat =
+SequentialReadBuffer.prototype.readFloatBE = function() {
+	this.remainingBits = this.currentBitByte = 0 ;
+	var v = this.buffer.readFloatBE( this.ptr ) ;
+	this.ptr += 4 ;
+	return v ;
+} ;
+
+SequentialReadBuffer.prototype.readFloatLE = function() {
+	this.remainingBits = this.currentBitByte = 0 ;
+	var v = this.buffer.readFloatLE( this.ptr ) ;
+	this.ptr += 4 ;
+	return v ;
+} ;
+
+
+
+SequentialReadBuffer.prototype.readNumber =
+SequentialReadBuffer.prototype.readDouble =
+SequentialReadBuffer.prototype.readDoubleBE = function() {
+	this.remainingBits = this.currentBitByte = 0 ;
+	var v = this.buffer.readDoubleBE( this.ptr ) ;
+	this.ptr += 8 ;
+	return v ;
+} ;
+
+SequentialReadBuffer.prototype.readDoubleLE = function() {
+	this.remainingBits = this.currentBitByte = 0 ;
+	var v = this.buffer.readDoubleLE( this.ptr ) ;
+	this.ptr += 8 ;
+	return v ;
+} ;
+
+
+
+SequentialReadBuffer.prototype.readUInt8 = function() {
+	this.remainingBits = this.currentBitByte = 0 ;
+	return this.buffer.readUInt8( this.ptr ++ ) ;
+} ;
+
+
+
+SequentialReadBuffer.prototype.readUInt16 =
+SequentialReadBuffer.prototype.readUInt16BE = function() {
+	this.remainingBits = this.currentBitByte = 0 ;
+	var v = this.buffer.readUInt16BE( this.ptr ) ;
+	this.ptr += 2 ;
+	return v ;
+} ;
+
+SequentialReadBuffer.prototype.readUInt16LE = function() {
+	this.remainingBits = this.currentBitByte = 0 ;
+	var v = this.buffer.readUInt16LE( this.ptr ) ;
+	this.ptr += 2 ;
+	return v ;
+} ;
+
+
+
+SequentialReadBuffer.prototype.readUInt32 =
+SequentialReadBuffer.prototype.readUInt32BE = function() {
+	this.remainingBits = this.currentBitByte = 0 ;
+	var v = this.buffer.readUInt32BE( this.ptr ) ;
+	this.ptr += 4 ;
+	return v ;
+} ;
+
+SequentialReadBuffer.prototype.readUInt32LE = function() {
+	this.remainingBits = this.currentBitByte = 0 ;
+	var v = this.buffer.readUInt32LE( this.ptr ) ;
+	this.ptr += 4 ;
+	return v ;
+} ;
+
+
+
+SequentialReadBuffer.prototype.readUInt64 =
+SequentialReadBuffer.prototype.readUInt64BE = function() {
+	this.remainingBits = this.currentBitByte = 0 ;
+	var v = this.buffer.readBigUInt64BE( this.ptr ) ;
+	this.ptr += 8 ;
+	return v ;
+} ;
+
+SequentialReadBuffer.prototype.readUInt64LE = function() {
+	this.remainingBits = this.currentBitByte = 0 ;
+	var v = this.buffer.readBigUInt64LE( this.ptr ) ;
+	this.ptr += 8 ;
+	return v ;
+} ;
+
+
+
+SequentialReadBuffer.prototype.readInt8 = function() {
+	this.remainingBits = this.currentBitByte = 0 ;
+	return this.buffer.readInt8( this.ptr ++ ) ;
+} ;
+
+
+
+SequentialReadBuffer.prototype.readInt16 =
+SequentialReadBuffer.prototype.readInt16BE = function() {
+	this.remainingBits = this.currentBitByte = 0 ;
+	var v = this.buffer.readInt16BE( this.ptr ) ;
+	this.ptr += 2 ;
+	return v ;
+} ;
+
+SequentialReadBuffer.prototype.readInt16LE = function() {
+	this.remainingBits = this.currentBitByte = 0 ;
+	var v = this.buffer.readInt16LE( this.ptr ) ;
+	this.ptr += 2 ;
+	return v ;
+} ;
+
+
+
+SequentialReadBuffer.prototype.readInt32 =
+SequentialReadBuffer.prototype.readInt32BE = function() {
+	this.remainingBits = this.currentBitByte = 0 ;
+	var v = this.buffer.readInt32BE( this.ptr ) ;
+	this.ptr += 4 ;
+	return v ;
+} ;
+
+SequentialReadBuffer.prototype.readInt32LE = function() {
+	this.remainingBits = this.currentBitByte = 0 ;
+	var v = this.buffer.readInt32LE( this.ptr ) ;
+	this.ptr += 4 ;
+	return v ;
+} ;
+
+
+
+SequentialReadBuffer.prototype.readInt64 =
+SequentialReadBuffer.prototype.readInt64BE = function() {
+	this.remainingBits = this.currentBitByte = 0 ;
+	var v = this.buffer.readBigInt64BE( this.ptr ) ;
+	this.ptr += 8 ;
+	return v ;
+} ;
+
+SequentialReadBuffer.prototype.readInt64LE = function() {
+	this.remainingBits = this.currentBitByte = 0 ;
+	var v = this.buffer.readBigInt64LE( this.ptr ) ;
+	this.ptr += 8 ;
+	return v ;
+} ;
+
+
+
+SequentialReadBuffer.prototype.readUtf8 = function( byteLength ) {
+	this.remainingBits = this.currentBitByte = 0 ;
+	var v = this.buffer.toString( 'utf8' , this.ptr , this.ptr + byteLength ) ;
+	this.ptr += byteLength ;
+	return v ;
+} ;
+
+
+
+// LPS: Length Prefixed String.
+// Read the UTF8 BYTE LENGTH using an UInt8.
+SequentialReadBuffer.prototype.readLps8Utf8 = function() {
+	// Read the LPS
+	var byteLength = this.readUInt8() ;
+	return this.readUtf8( byteLength ) ;
+} ;
+
+
+
+SequentialReadBuffer.prototype.readLps16Utf8 =
+SequentialReadBuffer.prototype.readLps16BEUtf8 = function() {
+	// Read the LPS
+	var byteLength = this.readUInt16() ;
+	return this.readUtf8( byteLength ) ;
+} ;
+
+SequentialReadBuffer.prototype.readLps16LEUtf8 = function() {
+	// Read the LPS
+	var byteLength = this.readUInt16LE() ;
+	return this.readUtf8( byteLength ) ;
+} ;
+
+
+
+SequentialReadBuffer.prototype.readLps32Utf8 =
+SequentialReadBuffer.prototype.readLps32BEUtf8 = function() {
+	// Read the LPS
+	var byteLength = this.readUInt32() ;
+	return this.readUtf8( byteLength ) ;
+} ;
+
+SequentialReadBuffer.prototype.readLps32LEUtf8 = function() {
+	// Read the LPS
+	var byteLength = this.readUInt32LE() ;
+	return this.readUtf8( byteLength ) ;
+} ;
+
+
+
+// Extract Buffer (copy, non-overlapping memory)
+
+SequentialReadBuffer.prototype.readLps8Buffer = function() {
+	var byteLength = this.readUInt8() ;
+	return this.readBuffer( byteLength ) ;
+} ;
+
+
+
+SequentialReadBuffer.prototype.readLps16Buffer =
+SequentialReadBuffer.prototype.readLps16BEBuffer = function() {
+	var byteLength = this.readUInt16() ;
+	return this.readBuffer( byteLength ) ;
+} ;
+
+SequentialReadBuffer.prototype.readLps16LEBuffer = function() {
+	var byteLength = this.readUInt16LE() ;
+	return this.readBuffer( byteLength ) ;
+} ;
+
+
+
+SequentialReadBuffer.prototype.readLps32Buffer =
+SequentialReadBuffer.prototype.readLps32BEBuffer = function() {
+	var byteLength = this.readUInt32() ;
+	return this.readBuffer( byteLength ) ;
+} ;
+
+SequentialReadBuffer.prototype.readLps32LEBuffer = function() {
+	var byteLength = this.readUInt32LE() ;
+	return this.readBuffer( byteLength ) ;
+} ;
+
+
+
+const COUNT_BIT_MASK = [
+	0 ,
+	0b1 ,
+	0b11 ,
+	0b111 ,
+	0b1111 ,
+	0b11111 ,
+	0b111111 ,
+	0b1111111 ,
+	0b11111111
+] ;
+
+
+
+// Read unsigned bits
+SequentialReadBuffer.prototype.readUBits =
+SequentialReadBuffer.prototype.readUBitsBE = function( bitCount ) {
+	if ( bitCount > 8 || bitCount < 1 ) {
+		throw new Error( "SequentialReadBuffer#readUBits() expecting bitCount to be between 1 and 8 but got: " + bitCount ) ;
+	}
+
+	if ( ! this.remainingBits ) {
+		this.currentBitByte = this.buffer.readUInt8( this.ptr ) ;
+		let v = this.currentBitByte >> 8 - bitCount ;
+		this.remainingBits = 8 - bitCount ;
+		this.ptr ++ ;
+		return v ;
+	}
+
+	if ( bitCount <= this.remainingBits ) {
+		// Enough bits in the current byte
+		let v = ( this.currentBitByte >> this.remainingBits - bitCount ) & COUNT_BIT_MASK[ bitCount ] ;
+		this.remainingBits -= bitCount ;
+		return v ;
+	}
+
+	// It's splitted in two parts
+	let bitCountLeftOver = bitCount - this.remainingBits ;
+	let leftV = ( this.currentBitByte & COUNT_BIT_MASK[ this.remainingBits ] ) << bitCountLeftOver ;
+
+	this.currentBitByte = this.buffer.readUInt8( this.ptr ) ;
+	let rightV = this.currentBitByte >> 8 - bitCountLeftOver ;
+	this.remainingBits = 8 - bitCountLeftOver ;
+	this.ptr ++ ;
+
+	return leftV + rightV ;
+} ;
+
+
+}).call(this)}).call(this,require("buffer").Buffer)
+},{"buffer":6}],5:[function(require,module,exports){
 'use strict'
 
 exports.byteLength = byteLength
@@ -1165,7 +1566,7 @@ function fromByteArray (uint8) {
   return parts.join('')
 }
 
-},{}],5:[function(require,module,exports){
+},{}],6:[function(require,module,exports){
 (function (Buffer){(function (){
 /*!
  * The buffer module from node.js, for the browser.
@@ -2946,7 +3347,7 @@ function numberIsNaN (obj) {
 }
 
 }).call(this)}).call(this,require("buffer").Buffer)
-},{"base64-js":4,"buffer":5,"ieee754":6}],6:[function(require,module,exports){
+},{"base64-js":5,"buffer":6,"ieee754":7}],7:[function(require,module,exports){
 /*! ieee754. BSD-3-Clause License. Feross Aboukhadijeh <https://feross.org/opensource> */
 exports.read = function (buffer, offset, isLE, mLen, nBytes) {
   var e, m
@@ -3033,7 +3434,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
   buffer[offset + i - d] |= s * 128
 }
 
-},{}],7:[function(require,module,exports){
+},{}],8:[function(require,module,exports){
 // shim for using process in browser
 var process = module.exports = {};
 
