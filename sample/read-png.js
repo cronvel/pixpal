@@ -43,5 +43,5 @@ async function test() {
 	}
 }
 
-test_() ;
+test() ;
 

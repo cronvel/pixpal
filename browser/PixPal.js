@@ -1,4 +1,5 @@
 (function(f){if(typeof exports==="object"&&typeof module!=="undefined"){module.exports=f()}else if(typeof define==="function"&&define.amd){define([],f)}else{var g;if(typeof window!=="undefined"){g=window}else if(typeof global!=="undefined"){g=global}else if(typeof self!=="undefined"){g=self}else{g=this}g.PixPal = f()}})(function(){var define,module,exports;return (function(){function r(e,n,t){function o(i,f){if(!n[i]){if(!e[i]){var c="function"==typeof require&&require;if(!f&&c)return c(i,!0);if(u)return u(i,!0);var a=new Error("Cannot find module '"+i+"'");throw a.code="MODULE_NOT_FOUND",a}var p=n[i]={exports:{}};e[i][0].call(p.exports,function(r){var n=e[i][1][r];return o(n||r)},p,p.exports,r,e,n,t)}return n[i].exports}for(var u="function"==typeof require&&require,i=0;i<t.length;i++)o(t[i]);return o}return r})()({1:[function(require,module,exports){
+(function (Buffer){(function (){
 /*
 	PixPal
 
@@ -43,8 +44,8 @@ function PixPal( width , height , palette , pixels ) {
 	}
 
 	if ( pixels ) {
-		if ( ! ( pixels instanceof Uint8ClampedArray ) ) {
-			throw new Error( "Provided pixel buffer is not a Uint8ClampedArray" ) ;
+		if ( ! ( pixels instanceof Buffer ) ) {
+			throw new Error( "Provided pixel buffer is not a Buffer" ) ;
 		}
 
 		if ( pixels.length !== this.width * this.height ) {
@@ -54,7 +55,7 @@ function PixPal( width , height , palette , pixels ) {
 		this.pixels = pixels ;
 	}
 	else {
-		this.pixels = new Uint8ClampedArray( width * height ) ;
+		this.pixels = new Buffer( width * height ) ;
 	}
 }
 
@@ -146,15 +147,6 @@ PixPal.prototype.updateImageData = function( imageData ) {
 
 
 // Convert RGBA to indexed
-PixPal.fromPng = ( imageData , options = {} ) => {
-	var pixPal = new PixPal( imageData.width , imageData.height , options.palette ) ;
-	pixPal.updateFromImageData
-	return pixPal ;
-} ;
-
-
-
-// Convert RGBA to indexed
 PixPal.updateFromImageData = function( imageData , options = {} ) {
 	if ( imageData.width !== this.width || imageData.height !== this.height ) {
 		throw new Error( ".updateFromImageData(): width and/or height mismatch" ) ;
@@ -211,7 +203,7 @@ PixPal.fromPng = ( png , options = {} ) => {
 		throw new Error( "Unsupported PNG, only supporting indexed color and 8 bits per pixels output" ) ;
 	}
 
-	var pixPal = new PixPal( png.width , png.height , png.palette , png.imageData ) ;
+	var pixPal = new PixPal( png.width , png.height , png.palette , png.imageBuffer ) ;
 
 	return pixPal ;
 } ;
@@ -245,14 +237,15 @@ PixPal.prototype.toPng = function( options = {} ) {
 		height: this.height ,
 		colorType: Png.COLOR_TYPE_INDEXED ,
 		palette: this.palette ,
-		imageData: this.pixels
+		imageBuffer: this.pixels
 	} ) ;
 
 	return png ;
 } ;
 
 
-},{"./Png.js":2}],2:[function(require,module,exports){
+}).call(this)}).call(this,require("buffer").Buffer)
+},{"./Png.js":2,"buffer":7}],2:[function(require,module,exports){
 (function (process,Buffer){(function (){
 /*
 	PixPal
@@ -285,6 +278,7 @@ PixPal.prototype.toPng = function( options = {} ) {
 
 
 const SequentialReadBuffer = require( 'stream-kit/lib/SequentialReadBuffer.js' ) ;
+const SequentialWriteBuffer = require( 'stream-kit/lib/SequentialWriteBuffer.js' ) ;
 const crc32 = require( 'crc-32' ) ;
 
 
@@ -359,7 +353,7 @@ function Png() {
 	//this.writableBuffer = null ;
 
 	// Final
-	this.imageData = null ;
+	this.imageBuffer = null ;
 }
 
 module.exports = Png ;
@@ -371,7 +365,7 @@ Png.createEncoder = ( params = {} ) => {
 
 	png.width = + params.width || 0 ;
 	png.height = + params.height || 0 ;
-	png.bitDepth = + params.bitDepth || 8 ;
+	png.bitDepth = + params.bitDepth || 0 ;
 	png.colorType = params.colorType ?? Png.COLOR_TYPE_INDEXED ;
 
 	png.compressionMethod = 0 ;
@@ -380,9 +374,21 @@ Png.createEncoder = ( params = {} ) => {
 
 	if ( Array.isArray( params.palette ) ) { png.palette = params.palette ; }
 
-	if ( params.imageData && ( params.imageData instanceof Uint8ClampedArray ) ) {
-		png.imageData = params.imageData ;
+	if ( params.imageBuffer && ( params.imageBuffer instanceof Buffer ) ) {
+		png.imageBuffer = params.imageBuffer ;
 	}
+
+	if ( ! png.bitDepth ) {
+		if ( png.colorType === Png.COLOR_TYPE_INDEXED ) {
+			png.bitDepth = 32 - Math.clz32( png.palette.length - 1 ) ;	// This formula give the number of bits for number of color
+			png.bitDepth = Math.max( 1 , Math.min( 8 , png.bitDepth ) ) ;
+		}
+		else {
+			png.bitDepth = 8 ;
+		}
+	}
+
+	png.computeBitsPerPixel() ;
 
 	return png ;
 } ;
@@ -441,7 +447,7 @@ Png.prototype.decode = async function( buffer , options = {} ) {
 	}
 
 	this.palette.length = 0 ;
-	this.imageData = null ;
+	this.imageBuffer = null ;
 
 	// Chunk reading
 	while ( ! readableBuffer.ended ) {
@@ -579,18 +585,17 @@ chunkDecoders.IHDR = function( readableBuffer , options ) {
 
 
 chunkEncoders.IHDR = function( options ) {
-	let buffer = Buffer.allocUnsafe( 13 ) ;
-	let offset = 0 ;
+	let writableBuffer = new SequentialWriteBuffer( 13 ) ;
 
-	buffer.writeUInt32BE( this.width , offset ) ; offset += 4 ;
-	buffer.writeUInt32BE( this.height , offset ) ; offset += 4 ;
-	buffer.writeUInt8( this.bitDepth , offset ) ; offset ++ ;
-	buffer.writeUInt8( this.colorType , offset ) ; offset ++ ;
-	buffer.writeUInt8( this.compressionMethod , offset ) ; offset ++ ;
-	buffer.writeUInt8( this.filterMethod , offset ) ; offset ++ ;
-	buffer.writeUInt8( this.interlaceMethod , offset ) ; offset ++ ;
+	writableBuffer.writeUInt32BE( this.width ) ;
+	writableBuffer.writeUInt32BE( this.height ) ;
+	writableBuffer.writeUInt8( this.bitDepth ) ;
+	writableBuffer.writeUInt8( this.colorType ) ;
+	writableBuffer.writeUInt8( this.compressionMethod ) ;
+	writableBuffer.writeUInt8( this.filterMethod ) ;
+	writableBuffer.writeUInt8( this.interlaceMethod ) ;
 
-	return buffer ;
+	return writableBuffer.getBuffer( true ) ;
 } ;
 
 
@@ -622,16 +627,16 @@ chunkEncoders.PLTE = function( options ) {
 	if ( this.colorType !== Png.COLOR_TYPE_INDEXED ) { return ; }
 	//if ( ! this.palette.length ) { return ; }
 
-	let buffer = Buffer.allocUnsafe( this.palette.length * 3 ) ;
+	let writableBuffer = new SequentialWriteBuffer( this.palette.length * 3 ) ;
 
-	for ( let index = 0 , offset = 0 ; index < this.palette.length ; index ++ , offset += 3 ) {
+	for ( let index = 0 ; index < this.palette.length ; index ++ ) {
 		let color = this.palette[ index ] ;
-		buffer.writeUInt8( color[ 0 ] , offset ) ;
-		buffer.writeUInt8( color[ 1 ] , offset + 1 ) ;
-		buffer.writeUInt8( color[ 2 ] , offset + 2 ) ;
+		writableBuffer.writeUInt8( color[ 0 ] ) ;
+		writableBuffer.writeUInt8( color[ 1 ] ) ;
+		writableBuffer.writeUInt8( color[ 2 ] ) ;
 	}
 
-	return buffer ;
+	return writableBuffer.getBuffer( true ) ;
 } ;
 
 
@@ -698,37 +703,36 @@ chunkDecoders.IDAT = function( readableBuffer , options ) {
 
 
 chunkEncoders.IDAT = async function( options ) {
-	if ( ! this.imageData ) { return ; }
+	if ( ! this.imageBuffer ) { return ; }
 
 	if ( this.colorType !== Png.COLOR_TYPE_INDEXED ) {
 		throw new Error( "Unsupported color type for IDAT: " + this.colorType ) ;
-	}
-
-	if ( this.bitDepth !== 8 ) {
-		throw new Error( "Unsupported bitDepth type for IDAT encoder: " + this.bitDepth ) ;
 	}
 
 	if ( this.interlaceMethod ) {
 		throw new Error( "Interlace methods are unsupported (IDAT): " + this.interlaceMethod ) ;
 	}
 
-	var lineByteLength = this.width + 1 ;
-	var idatBuffer = Buffer.allocUnsafe( lineByteLength * this.height ) ;
+	var imageBufferLineByteLength = this.width * this.decodedBytesPerPixel ;
+	var lineByteLength = 1 + Math.ceil( this.width * this.bitsPerPixel / 8 ) ;
+	var writableBuffer = new SequentialWriteBuffer( this.palette.length * 3 ) ;
 
 	// Prepare the PNG buffer, using only filter 0 and no Adam7, we just want it to work
 	for ( let y = 0 ; y < this.height ; y ++ ) {
-		let offset = y * lineByteLength ;
-
 		// We don't care for filters ATM, it requires heuristic, it's boring to do...
-		idatBuffer.writeUInt8( 0 , offset ) ;
+		writableBuffer.writeUInt8( 0 ) ;
 
-		// Boring, Buffer has no .copyFrom(), and this.imageData is a UInt8ClampedArray...
-		for ( let x = 0 ; x < this.width ; x ++ ) {
-			idatBuffer.writeUInt8( this.imageData[ y * this.width + x ] , offset + 1 + x ) ;
+		if ( this.bitsPerPixel >= 8 ) {
+			writableBuffer.writeBuffer( this.imageBuffer , y * imageBufferLineByteLength , ( y + 1 ) * imageBufferLineByteLength ) ;
+		}
+		else {
+			for ( let x = 0 ; x < this.width ; x ++ ) {
+				writableBuffer.writeUBits( this.imageBuffer[ y * imageBufferLineByteLength + x ] , this.bitsPerPixel ) ;
+			}
 		}
 	}
 
-	var compressedBuffer = await deflate( idatBuffer ) ;
+	var compressedBuffer = await deflate( writableBuffer.getBuffer( true ) ) ;
 	console.log( "Compressed IDAT:" , compressedBuffer , compressedBuffer.length ) ;
 
 	return compressedBuffer ;
@@ -758,7 +762,7 @@ Png.prototype.generateImageData = async function() {
 		throw new Error( "Interlace methods are unsupported (IDAT): " + this.interlaceMethod ) ;
 	}
 
-	this.imageData = new Uint8ClampedArray( this.width * this.height * this.decodedBytesPerPixel ) ;
+	this.imageBuffer = Buffer.allocUnsafe( this.width * this.height * this.decodedBytesPerPixel ) ;
 
 	var compressedBuffer = Buffer.concat( this.idatBuffers ) ;
 	var buffer = await inflate( compressedBuffer ) ;
@@ -766,7 +770,7 @@ Png.prototype.generateImageData = async function() {
 
 	var lineByteLength = 1 + Math.ceil( this.width * this.bitsPerPixel / 8 ) ;
 	var expectedBufferLength = lineByteLength * this.height ;
-	var imageDataLineByteLength = this.width * this.decodedBytesPerPixel ;
+	var imageBufferLineByteLength = this.width * this.decodedBytesPerPixel ;
 
 	if ( expectedBufferLength !== buffer.length ) {
 		throw new Error( "Expecting a decompressed buffer of length of " + expectedBufferLength + " but got: " + buffer.length ) ;
@@ -775,10 +779,24 @@ Png.prototype.generateImageData = async function() {
 	console.log( "lineByteLength:" , lineByteLength ) ;
 	for ( let y = 0 ; y < this.height ; y ++ ) {
 		this.decodeLineFilter( buffer , y * lineByteLength , ( y + 1 ) * lineByteLength , y > 0 ? ( y - 1 ) * lineByteLength : - 1 ) ;
-		this.extractLine( buffer , y * lineByteLength + 1 , y * imageDataLineByteLength ) ;
+		this.extractLine( buffer , y * lineByteLength + 1 , lineByteLength - 1 , y * imageBufferLineByteLength ) ;
 	}
 
-	console.log( "imageData:" , this.imageData , this.imageData.length ) ;
+	console.log( "imageBuffer:" , this.imageBuffer , this.imageBuffer.length ) ;
+} ;
+
+
+
+Png.prototype.extractLine = function( buffer , start , byteLength , imageBufferStart ) {
+	if ( this.bitsPerPixel >= 8 ) {
+		buffer.copy( this.imageBuffer , imageBufferStart , start , start + byteLength ) ;
+	}
+	else {
+		let readableBuffer = new SequentialReadBuffer( buffer.slice( start , start + byteLength ) ) ;
+		for ( let x = 0 ; x < this.width ; x ++ ) {
+			this.imageBuffer[ imageBufferStart + x ] = readableBuffer.readUBits( this.bitsPerPixel ) ;
+		}
+	}
 } ;
 
 
@@ -859,49 +877,6 @@ function paethPredictor( a , b , c ) {
 
 
 
-Png.prototype.extractLine = function( buffer , start , imageDataStart ) {
-	if ( this.bitsPerPixel >= 8 ) { this.extractLineFromBytes( buffer , start , imageDataStart ) ; }
-	else { this.extractLineFromBits( buffer , start , imageDataStart ) ; }
-} ;
-
-
-
-Png.prototype.extractLineFromBytes = function( buffer , start , imageDataStart ) {
-	for ( let i = 0 , imax = this.width * this.decodedBytesPerPixel ; i < imax ; i ++ ) {
-		this.imageData[ imageDataStart + i ] = buffer[ start + i ] ;
-	}
-} ;
-
-
-
-Png.prototype.extractLineFromBits = function( buffer , start , imageDataStart ) {
-	var byteRate = this.bitsPerPixel / 8 ;
-
-	for ( let x = 0 ; x < this.width ; x ++ ) {
-		let byteOffset = Math.floor( x * byteRate ) ;
-		let bitOffset = ( x * this.bitsPerPixel ) % 8 ;
-		this.imageData[ imageDataStart + x ] = extractBits( buffer[ start + byteOffset ] , bitOffset , this.bitsPerPixel ) ;
-	}
-} ;
-
-
-
-const COUNT_BIT_MASK = [
-	0 ,
-	0b1 ,
-	0b11 ,
-	0b111 ,
-	0b1111 ,
-	0b11111 ,
-	0b111111 ,
-	0b1111111 ,
-	0b11111111
-] ;
-
-const extractBits = ( byte , offset , count ) => ( byte >> ( 8 - offset - count ) ) & COUNT_BIT_MASK[ count ] ;
-
-
-
 Png.prototype.computeBitsPerPixel = function() {
 	switch ( this.colorType ) {
 		case Png.COLOR_TYPE_GRAYSCALE :
@@ -954,7 +929,7 @@ async function deflate( buffer ) {
 
 
 }).call(this)}).call(this,require('_process'),require("buffer").Buffer)
-},{"_process":8,"buffer":6,"crc-32":3,"stream-kit/lib/SequentialReadBuffer.js":4}],3:[function(require,module,exports){
+},{"_process":9,"buffer":7,"crc-32":3,"stream-kit/lib/SequentialReadBuffer.js":4,"stream-kit/lib/SequentialWriteBuffer.js":5}],3:[function(require,module,exports){
 /*! crc32.js (C) 2014-present SheetJS -- http://sheetjs.com */
 /* vim: set ts=2: */
 /*exported CRC32 */
@@ -1455,7 +1430,438 @@ SequentialReadBuffer.prototype.readUBitsBE = function( bitCount ) {
 
 
 }).call(this)}).call(this,require("buffer").Buffer)
-},{"buffer":6}],5:[function(require,module,exports){
+},{"buffer":7}],5:[function(require,module,exports){
+(function (Buffer){(function (){
+/*
+	Stream Kit
+
+	Copyright (c) 2016 - 2024 Cédric Ronvel
+
+	The MIT License (MIT)
+
+	Permission is hereby granted, free of charge, to any person obtaining a copy
+	of this software and associated documentation files (the "Software"), to deal
+	in the Software without restriction, including without limitation the rights
+	to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+	copies of the Software, and to permit persons to whom the Software is
+	furnished to do so, subject to the following conditions:
+
+	The above copyright notice and this permission notice shall be included in all
+	copies or substantial portions of the Software.
+
+	THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+	IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+	FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+	AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+	LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+	OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+	SOFTWARE.
+*/
+
+"use strict" ;
+
+
+
+// Bring all the good stuffs of StreamBuffer to regular buffer.
+// It will manage an auto-growing buffer.
+
+
+
+function SequentialWriteBuffer( chunkSize = 1024 , chunkSizeMultiplier = 1.5 ) {
+	this.chunkSize = chunkSize ;
+	this.chunkSizeMultiplier = chunkSizeMultiplier ;
+	this.buffer = Buffer.allocUnsafe( this.chunkSize ) ;
+	this.ptr = 0 ;
+	this.chunks = [] ;
+	this.allChunksSize = 0 ;
+
+	// Bit writing part
+	this.currentBitByte = 0 ;		// current byte where to push bits
+	this.remainingBits = 0 ;	// remaining bits inside the current byte, if 0 there is no byte where to put bits
+}
+
+module.exports = SequentialWriteBuffer ;
+
+
+
+SequentialWriteBuffer.prototype.size = function() { return this.allChunksSize + this.ptr ; } ;
+
+
+
+SequentialWriteBuffer.prototype.getBuffer = function( view = false ) {
+	if ( ! this.chunks.length ) {
+		let slice = this.buffer.slice( 0 , this.ptr ) ;
+		if ( view ) { return slice ; }
+		return Buffer.from( slice ) ;
+	}
+
+	if ( ! this.ptr ) { return Buffer.concat( this.chunks ) ; }
+	return Buffer.concat( [ ... this.chunks , this.buffer.slice( 0 , this.ptr ) ] ) ;
+} ;
+
+
+
+// Ensure that we can write that length to the current buffer, or create a new one
+SequentialWriteBuffer.prototype.ensureBytes = function( byteLength ) {
+	// Always reset bits
+	this.remainingBits = 0 ;
+	this.currentBitByte = 0 ;
+
+	if ( byteLength <= this.buffer.length - this.ptr ) { return ; }
+
+	this.chunks.push( this.buffer.slice( 0 , this.ptr ) ) ;
+	this.allChunksSize += this.ptr ;
+
+	// The next chunk wil be larger, to avoid allocation of too much buffers,
+	// it also should at least be large enough for the next write.
+	this.chunkSize = Math.ceil( Math.max( byteLength , this.chunkSize * this.chunkSizeMultiplier ) ) ;
+
+	this.buffer = Buffer.allocUnsafe( this.chunkSize ) ;
+	this.ptr = 0 ;
+} ;
+
+
+
+SequentialWriteBuffer.prototype.writeBuffer = function( buffer , start = 0 , end = buffer.length ) {
+	var byteLength = end - start ;
+	this.ensureBytes( byteLength ) ;
+	buffer.copy( this.buffer , this.ptr , start , end ) ;
+	this.ptr += byteLength ;
+} ;
+
+
+
+SequentialWriteBuffer.prototype.writeFloat =
+SequentialWriteBuffer.prototype.writeFloatBE = function( v ) {
+	this.ensureBytes( 4 ) ;
+	this.buffer.writeFloatBE( v , this.ptr ) ;
+	this.ptr += 4 ;
+} ;
+
+SequentialWriteBuffer.prototype.writeFloatLE = function( v ) {
+	this.ensureBytes( 4 ) ;
+	this.buffer.writeFloatLE( v , this.ptr ) ;
+	this.ptr += 4 ;
+} ;
+
+
+
+SequentialWriteBuffer.prototype.writeNumber =
+SequentialWriteBuffer.prototype.writeDouble =
+SequentialWriteBuffer.prototype.writeDoubleBE = function( v ) {
+	this.ensureBytes( 8 ) ;
+	this.buffer.writeDoubleBE( v , this.ptr ) ;
+	this.ptr += 8 ;
+} ;
+
+SequentialWriteBuffer.prototype.writeDoubleLE = function( v ) {
+	this.ensureBytes( 8 ) ;
+	this.buffer.writeDoubleLE( v , this.ptr ) ;
+	this.ptr += 8 ;
+} ;
+
+
+
+SequentialWriteBuffer.prototype.writeUInt8 = function( v ) {
+	this.ensureBytes( 1 ) ;
+	this.buffer.writeUInt8( v , this.ptr ) ;
+	this.ptr ++ ;
+} ;
+
+
+
+SequentialWriteBuffer.prototype.writeUInt16 =
+SequentialWriteBuffer.prototype.writeUInt16BE = function( v ) {
+	this.ensureBytes( 2 ) ;
+	this.buffer.writeUInt16BE( v , this.ptr ) ;
+	this.ptr += 2 ;
+} ;
+
+SequentialWriteBuffer.prototype.writeUInt16LE = function( v ) {
+	this.ensureBytes( 2 ) ;
+	this.buffer.writeUInt16LE( v , this.ptr ) ;
+	this.ptr += 2 ;
+} ;
+
+
+
+SequentialWriteBuffer.prototype.writeUInt32 =
+SequentialWriteBuffer.prototype.writeUInt32BE = function( v ) {
+	this.ensureBytes( 4 ) ;
+	this.buffer.writeUInt32BE( v , this.ptr ) ;
+	this.ptr += 4 ;
+} ;
+
+SequentialWriteBuffer.prototype.writeUInt32LE = function( v ) {
+	this.ensureBytes( 4 ) ;
+	this.buffer.writeUInt32LE( v , this.ptr ) ;
+	this.ptr += 4 ;
+} ;
+
+
+
+SequentialWriteBuffer.prototype.writeUInt64 =
+SequentialWriteBuffer.prototype.writeUInt64BE = function( v ) {
+	this.ensureBytes( 8 ) ;
+	this.buffer.writeBigUInt64BE( v , this.ptr ) ;
+	this.ptr += 8 ;
+} ;
+
+SequentialWriteBuffer.prototype.writeUInt64LE = function( v ) {
+	this.ensureBytes( 8 ) ;
+	this.buffer.writeBigUInt64LE( v , this.ptr ) ;
+	this.ptr += 8 ;
+} ;
+
+
+
+SequentialWriteBuffer.prototype.writeInt8 = function( v ) {
+	this.ensureBytes( 1 ) ;
+	this.buffer.writeInt8( v , this.ptr ) ;
+	this.ptr ++ ;
+} ;
+
+
+
+SequentialWriteBuffer.prototype.writeInt16 =
+SequentialWriteBuffer.prototype.writeInt16BE = function( v ) {
+	this.ensureBytes( 2 ) ;
+	this.buffer.writeInt16BE( v , this.ptr ) ;
+	this.ptr += 2 ;
+} ;
+
+SequentialWriteBuffer.prototype.writeInt16LE = function( v ) {
+	this.ensureBytes( 2 ) ;
+	this.buffer.writeInt16LE( v , this.ptr ) ;
+	this.ptr += 2 ;
+} ;
+
+
+
+SequentialWriteBuffer.prototype.writeInt32 =
+SequentialWriteBuffer.prototype.writeInt32BE = function( v ) {
+	this.ensureBytes( 4 ) ;
+	this.buffer.writeInt32BE( v , this.ptr ) ;
+	this.ptr += 4 ;
+} ;
+
+SequentialWriteBuffer.prototype.writeInt32LE = function( v ) {
+	this.ensureBytes( 4 ) ;
+	this.buffer.writeInt32LE( v , this.ptr ) ;
+	this.ptr += 4 ;
+} ;
+
+
+
+SequentialWriteBuffer.prototype.writeInt64 =
+SequentialWriteBuffer.prototype.writeInt64BE = function( v ) {
+	this.ensureBytes( 8 ) ;
+	this.buffer.writeBigInt64BE( v , this.ptr ) ;
+	this.ptr += 8 ;
+} ;
+
+SequentialWriteBuffer.prototype.writeInt64LE = function( v ) {
+	this.ensureBytes( 8 ) ;
+	this.buffer.writeBigInt64LE( v , this.ptr ) ;
+	this.ptr += 8 ;
+} ;
+
+
+
+SequentialWriteBuffer.prototype.writeString = function( v , byteLength , encoding = 'latin1' ) {
+	if ( byteLength === undefined ) {
+		byteLength = Buffer.byteLength( v , encoding ) ;
+	}
+
+	this.ensureBytes( byteLength ) ;
+	this.buffer.write( v , this.ptr , byteLength , encoding ) ;
+	this.ptr += byteLength ;
+} ;
+
+SequentialWriteBuffer.prototype.writeUtf8 = function( v , byteLength ) { return this.writeString( v , byteLength , 'utf8' ) ; } ;
+
+
+
+// LPS: Length prefixed string.
+// Store the UTF8 BYTE LENGTH using an UInt8.
+// Computing byteLength is probably costly, so if the upper layer know it, it can saves some cycles
+SequentialWriteBuffer.prototype.writeLps8String = function( v , byteLength , encoding = 'latin1' ) {
+	if ( byteLength === undefined ) {
+		byteLength = Buffer.byteLength( v , encoding ) ;
+	}
+
+	if ( byteLength > 255 ) {
+		// Error! What should we do?
+		throw new RangeError( 'The string exceed the LPS 8 bits limit' ) ;
+	}
+
+	// Write the LPS
+	this.writeUInt8( byteLength ) ;
+	this.writeString( v , byteLength , encoding ) ;
+} ;
+
+SequentialWriteBuffer.prototype.writeLps8Utf8 = function( v , byteLength ) { return this.writeLps8String( v , byteLength , 'utf8' ) ; } ;
+
+
+SequentialWriteBuffer.prototype.writeLps16String =
+SequentialWriteBuffer.prototype.writeLps16BEString = function( v , byteLength , encoding = 'latin1' ) {
+	if ( byteLength === undefined ) {
+		byteLength = Buffer.byteLength( v , encoding ) ;
+	}
+
+	if ( byteLength > 65535 ) {
+		// Error! What should we do?
+		throw new RangeError( 'The string exceed the LPS 16 bits limit' ) ;
+	}
+
+	// Write the LPS
+	this.writeUInt16( byteLength ) ;
+	this.writeString( v , byteLength , encoding ) ;
+} ;
+
+SequentialWriteBuffer.prototype.writeLps16Utf8 = SequentialWriteBuffer.prototype.writeLps16BEUtf8 = function( v , byteLength ) { return this.writeLps16String( v , byteLength , 'utf8' ) ; } ;
+
+SequentialWriteBuffer.prototype.writeLps16LEString = function( v , byteLength , encoding = 'latin1' ) {
+	if ( byteLength === undefined ) {
+		byteLength = Buffer.byteLength( v , encoding ) ;
+	}
+
+	if ( byteLength > 65535 ) {
+		// Error! What should we do?
+		throw new RangeError( 'The string exceed the LPS 16 bits limit' ) ;
+	}
+
+	// Write the LPS
+	this.writeUInt16LE( byteLength ) ;
+	this.writeString( v , byteLength , encoding ) ;
+} ;
+
+SequentialWriteBuffer.prototype.writeLps16LEUtf8 = function( v , byteLength ) { return this.writeLps16LEString( v , byteLength , 'utf8' ) ; } ;
+
+
+
+SequentialWriteBuffer.prototype.writeLps32String =
+SequentialWriteBuffer.prototype.writeLps32BEString = function( v , byteLength , encoding = 'latin1' ) {
+	if ( byteLength === undefined ) {
+		byteLength = Buffer.byteLength( v , encoding ) ;
+	}
+
+	// Write the LPS
+	this.writeUInt32( byteLength ) ;
+	this.writeString( v , byteLength , encoding ) ;
+} ;
+
+SequentialWriteBuffer.prototype.writeLps32Utf8 = SequentialWriteBuffer.prototype.writeLps32BEUtf8 = function( v , byteLength ) { return this.writeLps32String( v , byteLength , 'utf8' ) ; } ;
+
+SequentialWriteBuffer.prototype.writeLps32LEString = function( v , byteLength , encoding = 'latin1' ) {
+	if ( byteLength === undefined ) {
+		byteLength = Buffer.byteLength( v , encoding ) ;
+	}
+
+	// Write the LPS
+	this.writeUInt32LE( byteLength ) ;
+	this.writeString( v , byteLength , encoding ) ;
+} ;
+
+SequentialWriteBuffer.prototype.writeLps32LEUtf8 = function( v , byteLength ) { return this.writeLps32LEString( v , byteLength , 'utf8' ) ; } ;
+
+
+
+SequentialWriteBuffer.prototype.writeLps8Buffer = function( v ) {
+	if ( v.length > 255 ) { throw new RangeError( 'The buffer exceed the LPS 8 bits limit' ) ; }
+	this.writeUInt8( v.length ) ;
+	this.writeBuffer( v ) ;
+} ;
+
+
+
+SequentialWriteBuffer.prototype.writeLps16Buffer =
+SequentialWriteBuffer.prototype.writeLps16BEBuffer = function( v ) {
+	if ( v.length > 65535 ) { throw new RangeError( 'The buffer exceed the LPS 16 bits limit' ) ; }
+	this.writeUInt16( v.length ) ;
+	this.writeBuffer( v ) ;
+} ;
+
+SequentialWriteBuffer.prototype.writeLps16LEBuffer = function( v ) {
+	if ( v.length > 65535 ) { throw new RangeError( 'The buffer exceed the LPS 16 bits limit' ) ; }
+	this.writeUInt16LE( v.length ) ;
+	this.writeBuffer( v ) ;
+} ;
+
+
+
+SequentialWriteBuffer.prototype.writeLps32Buffer =
+SequentialWriteBuffer.prototype.writeLps32BEBuffer = function( v ) {
+	this.writeUInt32( v.length ) ;
+	this.writeBuffer( v ) ;
+} ;
+
+SequentialWriteBuffer.prototype.writeLps32LEBuffer = function( v ) {
+	this.writeUInt32LE( v.length ) ;
+	this.writeBuffer( v ) ;
+} ;
+
+
+
+const COUNT_BIT_MASK = [
+	0 ,
+	0b1 ,
+	0b11 ,
+	0b111 ,
+	0b1111 ,
+	0b11111 ,
+	0b111111 ,
+	0b1111111 ,
+	0b11111111
+] ;
+
+
+
+// Write unsigned bits
+SequentialWriteBuffer.prototype.writeUBits =
+SequentialWriteBuffer.prototype.writeUBitsBE = function( v , bitCount ) {
+	if ( bitCount > 8 || bitCount < 1 ) {
+		throw new Error( "SequentialWriteBuffer#writeUBits() expecting bitCount to be between 1 and 8 but got: " + bitCount ) ;
+	}
+
+	v &= COUNT_BIT_MASK[ bitCount ] ;
+
+	if ( ! this.remainingBits ) {
+		// Use a new byte, and since we write at most 8 bits, we are good to go
+		this.ensureBytes( 1 ) ;		// reset currentBitByte and remainingBits
+		this.currentBitByte = v << 8 - bitCount ;
+		this.remainingBits = 8 - bitCount ;
+		this.buffer.writeUInt8( this.currentBitByte , this.ptr ) ;
+		this.ptr ++ ;
+		return ;
+	}
+
+	if ( bitCount <= this.remainingBits ) {
+		// Enough bits in the current byte
+		this.currentBitByte |= v << this.remainingBits - bitCount ;
+		this.remainingBits -= bitCount ;
+		this.buffer.writeUInt8( this.currentBitByte , this.ptr - 1 ) ;	// Write on the previous byte
+		return ;
+	}
+
+	// Split in two parts
+	let bitCountLeftOver = bitCount - this.remainingBits ;
+	let leftV = v >> bitCountLeftOver ;
+	let rightV = v & COUNT_BIT_MASK[ bitCountLeftOver ] ;
+
+	this.currentBitByte |= leftV ;
+	this.buffer.writeUInt8( this.currentBitByte , this.ptr - 1 ) ;	// Write on the previous byte
+
+	this.ensureBytes( 1 ) ;		// reset currentBitByte and remainingBits
+	this.currentBitByte = rightV << 8 - bitCountLeftOver ;
+	this.remainingBits = 8 - bitCountLeftOver ;
+	this.buffer.writeUInt8( this.currentBitByte , this.ptr ) ;
+	this.ptr ++ ;
+} ;
+
+
+}).call(this)}).call(this,require("buffer").Buffer)
+},{"buffer":7}],6:[function(require,module,exports){
 'use strict'
 
 exports.byteLength = byteLength
@@ -1607,7 +2013,7 @@ function fromByteArray (uint8) {
   return parts.join('')
 }
 
-},{}],6:[function(require,module,exports){
+},{}],7:[function(require,module,exports){
 (function (Buffer){(function (){
 /*!
  * The buffer module from node.js, for the browser.
@@ -3388,7 +3794,7 @@ function numberIsNaN (obj) {
 }
 
 }).call(this)}).call(this,require("buffer").Buffer)
-},{"base64-js":5,"buffer":6,"ieee754":7}],7:[function(require,module,exports){
+},{"base64-js":6,"buffer":7,"ieee754":8}],8:[function(require,module,exports){
 /*! ieee754. BSD-3-Clause License. Feross Aboukhadijeh <https://feross.org/opensource> */
 exports.read = function (buffer, offset, isLE, mLen, nBytes) {
   var e, m
@@ -3475,7 +3881,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
   buffer[offset + i - d] |= s * 128
 }
 
-},{}],8:[function(require,module,exports){
+},{}],9:[function(require,module,exports){
 // shim for using process in browser
 var process = module.exports = {};
 
