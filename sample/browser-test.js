@@ -96,6 +96,20 @@ async function test() {
 }
 
 
+async function test2() {
+	var $canvas = document.getElementById( 'canvas' ) ;
+	var ctx = $canvas.getContext( '2d' ) ;
+
+	var portableImage = await PixPal.Png.loadImage( 'tiny.png' , { crc32: true } ) ;
+	console.log( portableImage ) ;
+
+	//ctx.fillStyle = "green"; ctx.fillRect(0, 0, 100, 100);
+
+	var imageData = portableImage.createImageData() ;
+	ctx.putImageData( imageData , 0 , 0 ) ;
+}
+
+
 // Like jQuery's $(document).ready()
 const ready = callback => {
     document.addEventListener( 'DOMContentLoaded' , function internalCallback() {
@@ -106,5 +120,5 @@ const ready = callback => {
 
 
 
-ready( test ) ;
+ready( test2 ) ;
 
