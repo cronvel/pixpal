@@ -1178,6 +1178,52 @@ PortableImage.prototype.getClosestPaletteIndex = ( channelValues ) => {
 PortableImage.RGB_MAPPING = [ 0 , 1 , 2 ] ;
 PortableImage.RGBA_MAPPING = [ 0 , 1 , 2 , 3 ] ;
 
+
+
+/*
+	Copy to another PortableImage instance.
+*/
+PortableImage.prototype.copyTo = function( portableImage ) {
+	
+	let src = {
+		buffer: this.pixelBuffer ,
+		width: this.width ,
+		height: this.height ,
+		bytesPerPixel: this.bytesPerPixel ,
+		x: 0 ,
+		y: 0 ,
+		endX: this.width ,
+		endY: this.height
+	} ;
+
+	let dst = {
+		buffer: portableImage.pixelBuffer ,
+		width: portableImage.width ,
+		height: portableImage.height ,
+		bytesPerPixel: portableImage.bytesPerPixel ,
+		x: 0 ,
+		y: 0 ,
+		endX: portableImage.width ,
+		endY: portableImage.height ,
+
+		scaleX: 1 ,
+		scaleY: 1 ,
+		channelValues: mapping.length === 3 ? [ null , null , null , 255 ] : [] ,
+		channelMapping: mapping
+	} ;
+	console.log( "### Mapping: " , mapping ) ;
+
+	if ( this.indexed ) {
+		src.palette = this.palette ;
+		PortableImage.indexedBlit( src , dst ) ;
+	}
+	else {
+		PortableImage.blit( src , dst ) ;
+	}
+} ;
+
+
+
 PortableImage.prototype.createImageData = function( mapping ) {
 	var imageData = new ImageData( this.width , this.height ) ;
 	this.updateImageData( imageData , mapping ) ;
@@ -1208,6 +1254,11 @@ PortableImage.prototype.updateImageData = function( imageData , mapping ) {
 		endY: this.height
 	} ;
 
+	if ( mapping.length < 4 ) {
+		mapping = [ ... mapping ] ;
+		for ( let i = mapping.length ; i < 4 ; i ++ ) { mapping[ i ] = - 1 ; }
+	}
+
 	let dst = {
 		buffer: imageData.data ,
 		width: imageData.width ,
@@ -1219,7 +1270,7 @@ PortableImage.prototype.updateImageData = function( imageData , mapping ) {
 		endY: imageData.height ,
 		scaleX: 1 ,
 		scaleY: 1 ,
-		channelValues: mapping.length === 3 ? [ null , null , null , 255 ] : [] ,
+		channelValues: [ 0 , 0 , 0 , 255 ] ,
 		channelMapping: mapping
 	} ;
 
@@ -1269,7 +1320,7 @@ PortableImage.prototype.updateImageData = function( imageData , mapping ) {
 PortableImage.blit = function( src , dst ) {
 	var blitWidth = Math.min( dst.endX - dst.x , ( src.endX - src.x ) * dst.scaleX ) ,
 		blitHeight = Math.min( dst.endY - dst.y , ( src.endY - src.y ) * dst.scaleY ) ,
-		channels = Math.max( dst.channelValues.length , dst.channelMapping.length ) ;
+		channels = dst.channelMapping.length ;
 
 	for ( let yOffset = 0 ; yOffset < blitHeight ; yOffset ++ ) {
 		for ( let xOffset = 0 ; xOffset < blitWidth ; xOffset ++ ) {
@@ -1277,11 +1328,15 @@ PortableImage.blit = function( src , dst ) {
 			let iSrc = Math.floor( ( ( src.y + yOffset / dst.scaleY ) * src.width + ( src.x + xOffset / dst.scaleX ) ) * src.bytesPerPixel ) ;
 
 			for ( let c = 0 ; c < channels ; c ++ ) {
-				dst.buffer[ iDst + c ] = dst.channelValues[ c ] ?? src.buffer[ iSrc + dst.channelMapping[ c ] ] ;
+				dst.buffer[ iDst + c ] =
+					dst.channelMapping[ c ] >= 0 ? src.buffer[ iSrc + dst.channelMapping[ c ] ] :
+					dst.channelValues[ c ] ;
 			}
 		}
 	}
 } ;
+
+
 
 /*
 	Perform a blit, but the source pixel is an index, that will be substituted by the relevant source palette .
@@ -1294,7 +1349,7 @@ PortableImage.blit = function( src , dst ) {
 PortableImage.indexedBlit = function( src , dst ) {
 	var blitWidth = Math.min( dst.endX - dst.x , ( src.endX - src.x ) * dst.scaleX ) ,
 		blitHeight = Math.min( dst.endY - dst.y , ( src.endY - src.y ) * dst.scaleY ) ,
-		channels = Math.max( dst.channelValues.length , dst.channelMapping.length ) ;
+		channels = dst.channelMapping.length ;
 
 	for ( let yOffset = 0 ; yOffset < blitHeight ; yOffset ++ ) {
 		for ( let xOffset = 0 ; xOffset < blitWidth ; xOffset ++ ) {
@@ -1303,7 +1358,9 @@ PortableImage.indexedBlit = function( src , dst ) {
 			let channelValues = src.palette[ src.buffer[ iSrc ] ] ;
 
 			for ( let c = 0 ; c < channels ; c ++ ) {
-				dst.buffer[ iDst + c ] = dst.channelValues[ c ] ?? channelValues[ dst.channelMapping[ c ] ] ;
+				dst.buffer[ iDst + c ] =
+					dst.channelMapping[ c ] >= 0 ? channelValues[ dst.channelMapping[ c ] ] :
+					dst.channelValues[ c ] ;
 			}
 		}
 	}
