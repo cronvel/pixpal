@@ -105,7 +105,7 @@ async function test2() {
 
 	//ctx.fillStyle = "green"; ctx.fillRect(0, 0, 100, 100);
 
-	var imageData = portableImage.createImageData() ;
+	var imageData = portableImage.createImageData( { scale: 10 } ) ;
 	ctx.putImageData( imageData , 0 , 0 ) ;
 }
 
