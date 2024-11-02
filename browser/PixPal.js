@@ -205,7 +205,7 @@ PixPal.fromPng = ( png , options = {} ) => {
 		throw new Error( "Unsupported PNG, only supporting indexed color and 8 bits per pixels output" ) ;
 	}
 
-	var pixPal = new PixPal( png.width , png.height , png.palette , png.imageBuffer ) ;
+	var pixPal = new PixPal( png.width , png.height , png.palette , png.pixelBuffer ) ;
 
 	return pixPal ;
 } ;
@@ -239,7 +239,7 @@ PixPal.prototype.toPng = function( options = {} ) {
 		height: this.height ,
 		colorType: Png.COLOR_TYPE_INDEXED ,
 		palette: this.palette ,
-		imageBuffer: this.pixels
+		pixelBuffer: this.pixels
 	} ) ;
 
 	return png ;
@@ -356,7 +356,7 @@ function Png() {
 	//this.writableBuffer = null ;
 
 	// Final
-	this.imageBuffer = null ;
+	this.pixelBuffer = null ;
 }
 
 module.exports = Png ;
@@ -377,8 +377,8 @@ Png.createEncoder = ( params = {} ) => {
 
 	if ( Array.isArray( params.palette ) ) { png.palette = params.palette ; }
 
-	if ( params.imageBuffer && ( params.imageBuffer instanceof Buffer ) ) {
-		png.imageBuffer = params.imageBuffer ;
+	if ( params.pixelBuffer && ( params.pixelBuffer instanceof Buffer ) ) {
+		png.pixelBuffer = params.pixelBuffer ;
 	}
 
 	if ( ! png.bitDepth ) {
@@ -457,7 +457,7 @@ Png.prototype.toImage = function() {
 		width: this.width ,
 		height: this.height ,
 		indexed: this.colorType === Png.COLOR_TYPE_INDEXED ,
-		pixelBuffer: this.imageBuffer
+		pixelBuffer: this.pixelBuffer
 	} ;
 
 	if ( params.indexed ) { params.palette = this.palette ; }
@@ -481,7 +481,7 @@ Png.prototype.decode = async function( buffer , options = {} ) {
 	}
 
 	this.palette.length = 0 ;
-	this.imageBuffer = null ;
+	this.pixelBuffer = null ;
 
 	// Chunk reading
 	while ( ! readableBuffer.ended ) {
@@ -744,7 +744,7 @@ chunkDecoders.IDAT = function( readableBuffer , options ) {
 
 
 chunkEncoders.IDAT = async function( options ) {
-	if ( ! this.imageBuffer ) { return ; }
+	if ( ! this.pixelBuffer ) { return ; }
 
 	if ( this.colorType !== Png.COLOR_TYPE_INDEXED ) {
 		throw new Error( "Unsupported color type for IDAT: " + this.colorType ) ;
@@ -756,7 +756,7 @@ chunkEncoders.IDAT = async function( options ) {
 
 	console.log( "Creating IDAT with bits per pixel / bit depth: " + this.bitsPerPixel + " / " + this.bitDepth ) ;
 
-	var imageBufferLineByteLength = this.width * this.decodedBytesPerPixel ;
+	var pixelBufferLineByteLength = this.width * this.decodedBytesPerPixel ;
 	var lineByteLength = 1 + Math.ceil( this.width * this.bitsPerPixel / 8 ) ;
 	var writableBuffer = new SequentialWriteBuffer( this.palette.length * 3 ) ;
 
@@ -766,11 +766,11 @@ chunkEncoders.IDAT = async function( options ) {
 		writableBuffer.writeUInt8( 0 ) ;
 
 		if ( this.bitsPerPixel >= 8 ) {
-			writableBuffer.writeBuffer( this.imageBuffer , y * imageBufferLineByteLength , ( y + 1 ) * imageBufferLineByteLength ) ;
+			writableBuffer.writeBuffer( this.pixelBuffer , y * pixelBufferLineByteLength , ( y + 1 ) * pixelBufferLineByteLength ) ;
 		}
 		else {
 			for ( let x = 0 ; x < this.width ; x ++ ) {
-				writableBuffer.writeUBits( this.imageBuffer[ y * imageBufferLineByteLength + x ] , this.bitsPerPixel ) ;
+				writableBuffer.writeUBits( this.pixelBuffer[ y * pixelBufferLineByteLength + x ] , this.bitsPerPixel ) ;
 			}
 		}
 	}
@@ -805,7 +805,7 @@ Png.prototype.generateImageData = async function() {
 		throw new Error( "Interlace methods are unsupported (IDAT): " + this.interlaceMethod ) ;
 	}
 
-	this.imageBuffer = Buffer.allocUnsafe( this.width * this.height * this.decodedBytesPerPixel ) ;
+	this.pixelBuffer = Buffer.allocUnsafe( this.width * this.height * this.decodedBytesPerPixel ) ;
 
 	var compressedBuffer = Buffer.concat( this.idatBuffers ) ;
 	var buffer = await inflate( compressedBuffer ) ;
@@ -813,7 +813,7 @@ Png.prototype.generateImageData = async function() {
 
 	var lineByteLength = 1 + Math.ceil( this.width * this.bitsPerPixel / 8 ) ;
 	var expectedBufferLength = lineByteLength * this.height ;
-	var imageBufferLineByteLength = this.width * this.decodedBytesPerPixel ;
+	var pixelBufferLineByteLength = this.width * this.decodedBytesPerPixel ;
 
 	if ( expectedBufferLength !== buffer.length ) {
 		throw new Error( "Expecting a decompressed buffer of length of " + expectedBufferLength + " but got: " + buffer.length ) ;
@@ -822,22 +822,22 @@ Png.prototype.generateImageData = async function() {
 	console.log( "lineByteLength:" , lineByteLength ) ;
 	for ( let y = 0 ; y < this.height ; y ++ ) {
 		this.decodeLineFilter( buffer , y * lineByteLength , ( y + 1 ) * lineByteLength , y > 0 ? ( y - 1 ) * lineByteLength : - 1 ) ;
-		this.extractLine( buffer , y * lineByteLength + 1 , lineByteLength - 1 , y * imageBufferLineByteLength ) ;
+		this.extractLine( buffer , y * lineByteLength + 1 , lineByteLength - 1 , y * pixelBufferLineByteLength ) ;
 	}
 
-	console.log( "imageBuffer:" , this.imageBuffer , this.imageBuffer.length ) ;
+	console.log( "pixelBuffer:" , this.pixelBuffer , this.pixelBuffer.length ) ;
 } ;
 
 
 
-Png.prototype.extractLine = function( buffer , start , byteLength , imageBufferStart ) {
+Png.prototype.extractLine = function( buffer , start , byteLength , pixelBufferStart ) {
 	if ( this.bitsPerPixel >= 8 ) {
-		buffer.copy( this.imageBuffer , imageBufferStart , start , start + byteLength ) ;
+		buffer.copy( this.pixelBuffer , pixelBufferStart , start , start + byteLength ) ;
 	}
 	else {
 		let readableBuffer = new SequentialReadBuffer( buffer.slice( start , start + byteLength ) ) ;
 		for ( let x = 0 ; x < this.width ; x ++ ) {
-			this.imageBuffer[ imageBufferStart + x ] = readableBuffer.readUBits( this.bitsPerPixel ) ;
+			this.pixelBuffer[ pixelBufferStart + x ] = readableBuffer.readUBits( this.bitsPerPixel ) ;
 		}
 	}
 } ;
@@ -1197,9 +1197,47 @@ PortableImage.prototype.updateImageData = function( imageData , mapping ) {
 		throw new Error( ".updateImageData(): width and/or height mismatch" ) ;
 	}
 
+	let src = {
+		buffer: this.pixelBuffer ,
+		width: this.width ,
+		height: this.height ,
+		bytesPerPixel: this.bytesPerPixel ,
+		x: 0 ,
+		y: 0 ,
+		endX: this.width ,
+		endY: this.height
+	} ;
+
+	let dst = {
+		buffer: imageData.data ,
+		width: imageData.width ,
+		height: imageData.height ,
+		bytesPerPixel: 4 ,
+		x: 0 ,
+		y: 0 ,
+		endX: imageData.width ,
+		endY: imageData.height ,
+		scaleX: 1 ,
+		scaleY: 1 ,
+		channelValues: mapping.length === 3 ? [ null , null , null , 255 ] : [] ,
+		channelMapping: mapping
+	} ;
+
+	if ( this.indexed ) {
+		src.palette = this.palette ;
+		PortableImage.indexedBlit( src , dst ) ;
+	}
+	else {
+		PortableImage.blit( src , dst ) ;
+	}
+
+	return ;
+
+
+	// This blit is faster, it could be useful to keep it when blitting from RGB -> RGBA with the same geometry
 	for ( let i = 0 , imax = this.width * this.height ; i < imax ; i ++ ) {
 		let iSrc = i * this.bytesPerPixel ;
-		let iDest = i * 4 ;
+		let iDst = i * 4 ;
 		let src = this.pixelBuffer ;
 
 		if ( this.indexed ) {
@@ -1207,10 +1245,67 @@ PortableImage.prototype.updateImageData = function( imageData , mapping ) {
 			iSrc = 0 ;
 		}
 
-		imageData.data[ iDest ] = src[ iSrc + mapping[ 0 ] ] ;		// Red
-		imageData.data[ iDest + 1 ] = src[ iSrc + mapping[ 1 ] ] ;	// Green
-		imageData.data[ iDest + 2 ] = src[ iSrc + mapping[ 2 ] ] ;	// Blue
-		imageData.data[ iDest + 3 ] = src[ iSrc + mapping[ 3 ] ] ?? 255 ;	// Alpha
+		imageData.data[ iDst ] = src[ iSrc + mapping[ 0 ] ] ;		// Red
+		imageData.data[ iDst + 1 ] = src[ iSrc + mapping[ 1 ] ] ;	// Green
+		imageData.data[ iDst + 2 ] = src[ iSrc + mapping[ 2 ] ] ;	// Blue
+		imageData.data[ iDst + 3 ] = src[ iSrc + mapping[ 3 ] ] ?? 255 ;	// Alpha
+	}
+} ;
+
+
+
+/*
+	src, dst:
+		* buffer: array-like
+		* width,height: geometry stored in the array-like
+		* bytesPerPixel
+		* x,y: coordinate where to start copying (included)
+		* endX,endY: coordinate where to stop copying (excluded)
+	dst:
+		* scaleX,scaleY: drawing scale (nearest)
+		* channelValues: an array of values for each channel, if a value is null/undefined, we got it from the channel mapping
+		* channelMapping: the mapping of the channel from src to dst
+*/
+PortableImage.blit = function( src , dst ) {
+	var blitWidth = Math.min( dst.endX - dst.x , ( src.endX - src.x ) * dst.scaleX ) ,
+		blitHeight = Math.min( dst.endY - dst.y , ( src.endY - src.y ) * dst.scaleY ) ,
+		channels = Math.max( dst.channelValues.length , dst.channelMapping.length ) ;
+
+	for ( let yOffset = 0 ; yOffset < blitHeight ; yOffset ++ ) {
+		for ( let xOffset = 0 ; xOffset < blitWidth ; xOffset ++ ) {
+			let iDst = ( ( dst.y + yOffset ) * dst.width + ( dst.x + xOffset ) ) * dst.bytesPerPixel ;
+			let iSrc = Math.floor( ( ( src.y + yOffset / dst.scaleY ) * src.width + ( src.x + xOffset / dst.scaleX ) ) * src.bytesPerPixel ) ;
+
+			for ( let c = 0 ; c < channels ; c ++ ) {
+				dst.buffer[ iDst + c ] = dst.channelValues[ c ] ?? src.buffer[ iSrc + dst.channelMapping[ c ] ] ;
+			}
+		}
+	}
+} ;
+
+/*
+	Perform a blit, but the source pixel is an index, that will be substituted by the relevant source palette .
+
+	Same arguments than .blit(), plus:
+
+	src:
+		palette: an array of array of values
+*/
+PortableImage.indexedBlit = function( src , dst ) {
+	var blitWidth = Math.min( dst.endX - dst.x , ( src.endX - src.x ) * dst.scaleX ) ,
+		blitHeight = Math.min( dst.endY - dst.y , ( src.endY - src.y ) * dst.scaleY ) ,
+		channels = Math.max( dst.channelValues.length , dst.channelMapping.length ) ;
+
+	for ( let yOffset = 0 ; yOffset < blitHeight ; yOffset ++ ) {
+		for ( let xOffset = 0 ; xOffset < blitWidth ; xOffset ++ ) {
+			let iDst = ( ( dst.y + yOffset ) * dst.width + ( dst.x + xOffset ) ) * dst.bytesPerPixel ;
+			let iSrc = Math.floor( ( ( src.y + yOffset / dst.scaleY ) * src.width + ( src.x + xOffset / dst.scaleX ) ) * src.bytesPerPixel ) ;
+			let channelValues = src.palette[ src.buffer[ iSrc ] ] ;
+
+			for ( let c = 0 ; c < channels ; c ++ ) {
+				dst.buffer[ iDst + c ] = dst.channelValues[ c ] ?? channelValues[ dst.channelMapping[ c ] ] ;
+			}
+		}
 	}
 } ;
 
@@ -1228,23 +1323,23 @@ PortableImage.prototype.updateFromImageData = function( imageData , mapping ) {
 	}
 	
 	for ( let i = 0 , imax = this.width * this.height ; i < imax ; i ++ ) {
-		let iDest = i * this.bytesPerPixel ;
+		let iDst = i * this.bytesPerPixel ;
 		let iSrc = i * 4 ;
 
 		if ( this.indexed ) {
 			let channelValues = [] ;
-			channelValues[ iDest + mapping[ 0 ] ] = imageData[ iSrc ] ;
-			channelValues[ iDest + mapping[ 1 ] ] = imageData[ iSrc + 1 ] ;
-			channelValues[ iDest + mapping[ 2 ] ] = imageData[ iSrc + 2 ] ;
-			channelValues[ iDest + mapping[ 3 ] ] = imageData[ iSrc + 3 ] ;
+			channelValues[ iDst + mapping[ 0 ] ] = imageData[ iSrc ] ;
+			channelValues[ iDst + mapping[ 1 ] ] = imageData[ iSrc + 1 ] ;
+			channelValues[ iDst + mapping[ 2 ] ] = imageData[ iSrc + 2 ] ;
+			channelValues[ iDst + mapping[ 3 ] ] = imageData[ iSrc + 3 ] ;
 
-			this.pixelBuffer[ iDest ] = this.getClosestPaletteIndex( channelValues ) ;
+			this.pixelBuffer[ iDst ] = this.getClosestPaletteIndex( channelValues ) ;
 		}
 
-		this.pixelBuffer[ iDest + mapping[ 0 ] ] = imageData[ iSrc ] ;
-		this.pixelBuffer[ iDest + mapping[ 1 ] ] = imageData[ iSrc + 1 ] ;
-		this.pixelBuffer[ iDest + mapping[ 2 ] ] = imageData[ iSrc + 2 ] ;
-		this.pixelBuffer[ iDest + mapping[ 3 ] ] = imageData[ iSrc + 3 ] ;
+		this.pixelBuffer[ iDst + mapping[ 0 ] ] = imageData[ iSrc ] ;
+		this.pixelBuffer[ iDst + mapping[ 1 ] ] = imageData[ iSrc + 1 ] ;
+		this.pixelBuffer[ iDst + mapping[ 2 ] ] = imageData[ iSrc + 2 ] ;
+		this.pixelBuffer[ iDst + mapping[ 3 ] ] = imageData[ iSrc + 3 ] ;
 	}
 } ;
 
