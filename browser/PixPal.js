@@ -1235,6 +1235,14 @@ PortableImage.prototype.createImageData = function( params = {} ) {
 
 
 
+/*
+	/!\ WIP /!\
+
+	Mapping is now an array of twice the size of the channels, pairs of values :
+	* the first of the pair is the channel fixed value, it's null if the second of the pair should be used instead
+	* the second of the pair is the source channel index, it's null if the first of the pair should be used instead
+*/
+
 PortableImage.DEFAULT_CHANNEL_VALUES = {
 	R: 0 ,
 	G: 0 ,
@@ -1242,22 +1250,48 @@ PortableImage.DEFAULT_CHANNEL_VALUES = {
 	A: 255
 } ;
 
-
-
 // Create the mapping to another PortableImage
 PortableImage.prototype.getMappingTo = function( toPortableImage , defaultChannelValues = PortableImage.DEFAULT_CHANNEL_VALUES ) {
-	return mapping = toPortableImage.channels.map( channel => this.channelIndex[ channel ] ?? defaultChannelValues[ channel ] ?? 0 ) ;
+	return this.getMappingToChannels( toPortableImage.channels , defaultChannelValues ) ;
 } ;
 
 PortableImage.prototype.getMappingToChannels = function( toChannels , defaultChannelValues = PortableImage.DEFAULT_CHANNEL_VALUES ) {
-	return mapping = toChannels.map( channel => this.channelIndex[ channel ] ?? defaultChannelValues[ channel ] ?? 0 ) ;
+	var mapping = new Array( toChannels.length * 2 ) ;
+
+	for ( let index = 0 ; index < toChannels.length ; index ++ ) {
+		let channel = toChannels[ index ] ;
+
+		if ( Object.hasOwn( this.channelIndex , channel ) ) {
+			mapping[ index * 2 ] = null ;
+			mapping[ index * 2 + 1 ] = this.channelIndex[ channel ] ;
+		}
+		else {
+			mapping[ index * 2 ] = defaultChannelValues[ channel ] ?? 0 ;
+			mapping[ index * 2 + 1 ] = null ;
+		}
+	}
+
+	return mapping ;
 } ;
 
 PortableImage.getMapping = function( fromChannels , toChannels , defaultChannelValues = PortableImage.DEFAULT_CHANNEL_VALUES ) {
-	return mapping = toChannels.map( channel => {
+	var mapping = new Array( toChannels.length * 2 ) ;
+
+	for ( let index = 0 ; index < toChannels.length ; index ++ ) {
+		let channel = toChannels[ index ] ;
 		let indexOf = fromChannels.indexOf( channel ) ;
-		return indexOf >= 0 ? indexOf : defaultChannelValues[ channel ] ?? 0
-	} ) ;
+
+		if ( indexOf >= 0 ) {
+			mapping[ index * 2 ] = null ;
+			mapping[ index * 2 + 1 ] = indexOf ;
+		}
+		else {
+			mapping[ index * 2 ] = defaultChannelValues[ channel ] ?? 0 ;
+			mapping[ index * 2 + 1 ] = null ;
+		}
+	}
+
+	return mapping ;
 } ;
 
 
