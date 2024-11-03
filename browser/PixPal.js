@@ -1235,6 +1235,33 @@ PortableImage.prototype.createImageData = function( params = {} ) {
 
 
 
+PortableImage.DEFAULT_CHANNEL_VALUES = {
+	R: 0 ,
+	G: 0 ,
+	B: 0 ,
+	A: 255
+} ;
+
+
+
+// Create the mapping to another PortableImage
+PortableImage.prototype.getMappingTo = function( toPortableImage , defaultChannelValues = PortableImage.DEFAULT_CHANNEL_VALUES ) {
+	return mapping = toPortableImage.channels.map( channel => this.channelIndex[ channel ] ?? defaultChannelValues[ channel ] ?? 0 ) ;
+} ;
+
+PortableImage.prototype.getMappingToChannels = function( toChannels , defaultChannelValues = PortableImage.DEFAULT_CHANNEL_VALUES ) {
+	return mapping = toChannels.map( channel => this.channelIndex[ channel ] ?? defaultChannelValues[ channel ] ?? 0 ) ;
+} ;
+
+PortableImage.getMapping = function( fromChannels , toChannels , defaultChannelValues = PortableImage.DEFAULT_CHANNEL_VALUES ) {
+	return mapping = toChannels.map( channel => {
+		let indexOf = fromChannels.indexOf( channel ) ;
+		return indexOf >= 0 ? indexOf : defaultChannelValues[ channel ] ?? 0
+	} ) ;
+} ;
+
+
+
 PortableImage.prototype.updateImageData = function( imageData , params = {} ) {
 	var mapping = params.mapping ,
 		scaleX = params.scaleX ?? params.scale ?? 1 ,
