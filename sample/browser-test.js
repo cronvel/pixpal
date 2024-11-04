@@ -32,16 +32,13 @@ async function test() {
 	var $canvas = document.getElementById( 'canvas' ) ;
 	var ctx = $canvas.getContext( '2d' ) ;
 
-	var pixPal = await PixPal.loadPng( 'tiny.png' , { crc32: true } ) ;
-	//var pixPal = await PixPal.loadPng( 'crappy.png' , { crc32: true } ) ;
-	//var pixPal = await PixPal.loadPng( 'out.png' , { crc32: true } ) ;
-	console.log( pixPal ) ;
+	var portableImage = await PixPal.Png.loadImage( 'tiny.png' , { crc32: true } ) ;
+	console.log( portableImage ) ;
 
-	//ctx.fillStyle = "green"; ctx.fillRect(0, 0, 100, 100);
-
-	var imageData = pixPal.createImageData() ;
+	var imageDataParams = { scaleX: 20 , scaleY: 20 } ;
+	var imageData = portableImage.createImageData( imageDataParams ) ;
 	ctx.putImageData( imageData , 0 , 0 ) ;
-	
+
 	var colorRotationIndex = 0 ,
 		colorRotation = [
 			[255,0,0],
@@ -67,28 +64,13 @@ async function test() {
 			'#ff000020',
 		] ;
 
-	var scaleRate = 30 ;
-	//var scaleRate = 1 ;
-
 	setInterval( async () => {
 		let imageBitmap = await createImageBitmap( imageData ) ;
 
 		colorRotationIndex = ( colorRotationIndex + 1 ) % colorRotation.length ;
-		pixPal.setColor( 2 , colorRotation[ colorRotationIndex ] ) ;
-		pixPal.updateImageData( imageData ) ;
-
-		ctx.fillStyle = "green"; ctx.fillRect(0, 0, $canvas.width, $canvas.height);
-		ctx.save() ;
-		ctx.scale( scaleRate , scaleRate ) ;
-		
-		// .putImageData() doesn't support scaling, it is supposed to be raw data access to a canvas
-		//ctx.putImageData( imageData , 0 , 0 ) ;
-
-		// .drawImage() support scaling, but don't support ImageData, it should be an ImageBitmap
-		ctx.imageSmoothingEnabled = false ;		// For pixel art, this is mandatory if we don't want the pixels to be blurred away
-		ctx.drawImage( imageBitmap , 0 , 0 ) ;
-
-		ctx.restore() ;
+		portableImage.setPaletteColor( 2 , colorRotation[ colorRotationIndex ] ) ;
+		portableImage.updateImageData( imageData , imageDataParams ) ;
+		ctx.putImageData( imageData , 0 , 0 ) ;
 	} , 100 ) ;
 
 	// Trigger a download
@@ -105,7 +87,7 @@ async function test2() {
 
 	//ctx.fillStyle = "green"; ctx.fillRect(0, 0, 100, 100);
 
-	var imageData = portableImage.createImageData( { scale: 10 } ) ;
+	var imageData = portableImage.createImageData( { scaleX: 10 , scaleY: 20 } ) ;
 	ctx.putImageData( imageData , 0 , 0 ) ;
 }
 
@@ -120,5 +102,5 @@ const ready = callback => {
 
 
 
-ready( test2 ) ;
+ready( test ) ;
 
