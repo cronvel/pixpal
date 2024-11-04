@@ -19,24 +19,15 @@ var outputFile = process.argv[ 3 ] ?? null ;
 
 
 async function test_() {
-	let png = await PixPal.Png.load( sourceFile , { crc32: true } ) ;
-	return ;
+	var pixPal = await PixPal.loadPng( sourceFile , { crc32: true } ) ;
 
 	if ( outputFile ) {
-		let png = await PixPal.Png.load( sourceFile , { crc32: true } ) ;
-		
-		// TMP: force bitDepth
-		png.bitDepth = 8 ;
-		
-		png.save( outputFile ) ;
-	}
-	else {
-		await PixPal.loadPng( sourceFile , { crc32: true } ) ;
+		await pixPal.savePng( outputFile ) ;
 	}
 }
 
 async function test() {
-	var pixPal = await PixPal.loadPng( sourceFile , { crc32: true } ) ;
+	var image = await PixPal.Png.loadImage( sourceFile , { crc32: true } ) ;
 
 	if ( outputFile ) {
 		await pixPal.savePng( outputFile ) ;
