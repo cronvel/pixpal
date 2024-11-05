@@ -18,19 +18,11 @@ var sourceFile = process.argv[ 2 ] ;
 var outputFile = process.argv[ 3 ] ?? null ;
 
 
-async function test_() {
-	var pixPal = await PixPal.loadPng( sourceFile , { crc32: true } ) ;
-
-	if ( outputFile ) {
-		await pixPal.savePng( outputFile ) ;
-	}
-}
-
 async function test() {
 	var image = await PixPal.Png.loadImage( sourceFile , { crc32: true } ) ;
 
 	if ( outputFile ) {
-		await pixPal.savePng( outputFile ) ;
+		await PixPal.Png.saveImage( outputFile , image ) ;
 	}
 }
 

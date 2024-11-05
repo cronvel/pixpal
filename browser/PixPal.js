@@ -538,9 +538,29 @@ Png.prototype.save = async function( url , options = {} ) {
 
 
 
+Png.saveImage = async function( url , portableImage , options = {} ) {
+	var png = Png.fromImage( portableImage ) ;
+	var buffer = await png.encode( options ) ;
+	await saveFileAsync( url , buffer ) ;
+} ;
+
+
+
 Png.prototype.download = async function( filename , options = {} ) {
 	var buffer = await this.encode( options ) ;
 	await download( filename , buffer ) ;
+} ;
+
+
+
+Png.fromImage = function( portableImage ) {
+	return Png.createEncoder( {
+		width: portableImage.width ,
+		height: portableImage.height ,
+		colorType: Png.COLOR_TYPE_INDEXED ,
+		palette: portableImage.palette ,
+		pixelBuffer: portableImage.pixelBuffer
+	} ) ;
 } ;
 
 
@@ -1066,7 +1086,6 @@ module.exports = PortableImage ;
 
 PortableImage.RGB = [ 'R' , 'G' , 'B' ] ;
 PortableImage.RGBA = [ 'R' , 'G' , 'B' , 'A' ] ;
-
 
 
 
