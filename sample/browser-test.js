@@ -28,7 +28,7 @@
 
 
 
-async function test() {
+async function testIndexed() {
 	var $canvas = document.getElementById( 'canvas' ) ;
 	var ctx = $canvas.getContext( '2d' ) ;
 
@@ -78,16 +78,17 @@ async function test() {
 }
 
 
-async function test2() {
+async function testTrueColor() {
 	var $canvas = document.getElementById( 'canvas' ) ;
 	var ctx = $canvas.getContext( '2d' ) ;
 
-	var portableImage = await PixPal.Png.loadImage( 'tiny-indexed.png' , { crc32: true } ) ;
+	var portableImage = await PixPal.Png.loadImage( 'tiny-true-color.png' , { crc32: true } ) ;
 	console.log( portableImage ) ;
 
 	//ctx.fillStyle = "green"; ctx.fillRect(0, 0, 100, 100);
 
-	var imageData = portableImage.createImageData( { scaleX: 10 , scaleY: 20 } ) ;
+	var imageDataParams = { scaleX: 20 , scaleY: 20 } ;
+	var imageData = portableImage.createImageData( imageDataParams ) ;
 	ctx.putImageData( imageData , 0 , 0 ) ;
 }
 
@@ -102,5 +103,6 @@ const ready = callback => {
 
 
 
-ready( test ) ;
+//ready( testIndexed ) ;
+ready( testTrueColor ) ;
 

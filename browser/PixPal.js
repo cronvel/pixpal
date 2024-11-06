@@ -335,10 +335,14 @@ function Png() {
 	this.filterMethod = - 1 ;
 	this.interlaceMethod = - 1 ;
 
-	// PLTE and tRNS
+	// PLTE (and tRNS for indexed mode)
 	this.palette = [] ;
+	
+	// tRNS
+	this.transparencyColor = null ;	// transperancy color, also known as color-key
 
 	// bKGD
+	this.backgroundColor = null ;
 	this.backgroundColorIndex = - 1 ;
 
 	// IDAT
@@ -703,17 +707,34 @@ chunkEncoders.PLTE = function( options ) {
 
 
 chunkDecoders.tRNS = function( readableBuffer , options ) {
-	if ( this.colorType !== Png.COLOR_TYPE_INDEXED ) {
-		throw new Error( "Unsupported color type for tRNS: " + this.colorType ) ;
+	switch ( this.colorType ) {
+		case Png.COLOR_TYPE_RGB :
+		case Png.COLOR_TYPE_RGBA : {
+			let r = Math.min( 255 , readableBuffer.readUInt16BE() << ( 8 - this.bitDepth ) ) ;
+			let g = Math.min( 255 , readableBuffer.readUInt16BE() << ( 8 - this.bitDepth ) ) ;
+			let b = Math.min( 255 , readableBuffer.readUInt16BE() << ( 8 - this.bitDepth ) ) ;
+			this.transparencyColor = [ r , g , b ] ;
+			console.log( "bKGD:" , this.backgroundColor ) ;
+			break ;
+		}
+		case Png.COLOR_TYPE_GRAYSCALE :
+		case Png.COLOR_TYPE_GRAYSCALE_ALPHA : {
+			let grayscale = Math.min( 255 , readableBuffer.readUInt16BE() << ( 8 - this.bitDepth ) ) ;
+			this.transparencyColor = [ grayscale ] ;
+			console.log( "bKGD:" , this.backgroundColor ) ;
+			break ;
+		}
+		case Png.COLOR_TYPE_INDEXED : {
+			let index = 0 ;
+
+			while ( ! readableBuffer.ended && index < this.palette.length ) {
+				this.palette[ index ++ ][ 3 ] = readableBuffer.readUInt8() ;
+			}
+
+			console.log( "tRNS:" , this.palette ) ;
+			break ;
+		}
 	}
-
-	let index = 0 ;
-
-	while ( ! readableBuffer.ended && index < this.palette.length ) {
-		this.palette[ index ++ ][ 3 ] = readableBuffer.readUInt8() ;
-	}
-
-	console.log( "tRNS:" , this.palette ) ;
 } ;
 
 
@@ -735,13 +756,29 @@ chunkEncoders.tRNS = function( options ) {
 
 
 chunkDecoders.bKGD = function( readableBuffer , options ) {
-	if ( this.colorType !== Png.COLOR_TYPE_INDEXED ) {
-		throw new Error( "Unsupported color type for bKGD: " + this.colorType ) ;
+	switch ( this.colorType ) {
+		case Png.COLOR_TYPE_RGB :
+		case Png.COLOR_TYPE_RGBA : {
+			let r = Math.min( 255 , readableBuffer.readUInt16BE() << ( 8 - this.bitDepth ) ) ;
+			let g = Math.min( 255 , readableBuffer.readUInt16BE() << ( 8 - this.bitDepth ) ) ;
+			let b = Math.min( 255 , readableBuffer.readUInt16BE() << ( 8 - this.bitDepth ) ) ;
+			this.backgroundColor = [ r , g , b ] ;
+			console.log( "bKGD:" , this.backgroundColor ) ;
+			break ;
+		}
+		case Png.COLOR_TYPE_GRAYSCALE :
+		case Png.COLOR_TYPE_GRAYSCALE_ALPHA : {
+			let grayscale = Math.min( 255 , readableBuffer.readUInt16BE() << ( 8 - this.bitDepth ) ) ;
+			this.backgroundColor = [ grayscale , grayscale , grayscale ] ;
+			console.log( "bKGD:" , this.backgroundColor ) ;
+			break ;
+		}
+		case Png.COLOR_TYPE_INDEXED : {
+			this.backgroundColorIndex = readableBuffer.readUInt8() ;
+			console.log( "bKGD:" , this.backgroundColorIndex ) ;
+			break ;
+		}
 	}
-
-	this.backgroundColorIndex = readableBuffer.readUInt8() ;
-
-	console.log( "bKGD:" , this.backgroundColorIndex ) ;
 } ;
 
 
@@ -766,9 +803,7 @@ chunkDecoders.IDAT = function( readableBuffer , options ) {
 chunkEncoders.IDAT = async function( options ) {
 	if ( ! this.pixelBuffer ) { return ; }
 
-	if ( this.colorType !== Png.COLOR_TYPE_INDEXED ) {
-		throw new Error( "Unsupported color type for IDAT: " + this.colorType ) ;
-	}
+	//if ( this.colorType !== Png.COLOR_TYPE_INDEXED ) { throw new Error( "Unsupported color type for IDAT: " + this.colorType ) ; }
 
 	if ( this.interlaceMethod ) {
 		throw new Error( "Interlace methods are unsupported (IDAT): " + this.interlaceMethod ) ;
@@ -817,9 +852,7 @@ chunkEncoders.IEND = function() {
 
 
 Png.prototype.generateImageData = async function() {
-	if ( this.colorType !== Png.COLOR_TYPE_INDEXED ) {
-		throw new Error( "Unsupported color type for IDAT: " + this.colorType ) ;
-	}
+	//if ( this.colorType !== Png.COLOR_TYPE_INDEXED ) { throw new Error( "Unsupported color type for IDAT: " + this.colorType ) ; }
 
 	if ( this.interlaceMethod ) {
 		throw new Error( "Interlace methods are unsupported (IDAT): " + this.interlaceMethod ) ;
@@ -867,7 +900,8 @@ Png.prototype.extractLine = function( buffer , start , byteLength , pixelBufferS
 Png.prototype.decodeLineFilter = function( buffer , start , end , lastLineStart ) {
 	var filterType = buffer[ start ] ;
 	if ( filterType === 0 ) { return ; }	// filter 0 doesn't change anything
-	console.log( "Watch out! FilterType is not 0!" ) ;
+	//console.log( "Watch out! FilterType is not 0! Filter:" , filterType , filters[ filterType ] ) ;
+	if ( ! filters[ filterType ] ) { throw new Error( "Unknown filter type: " + filterType ) ; }
 
 	var bytesPerPixel = Math.ceil( this.bitsPerPixels / 8 ) ;
 
@@ -885,7 +919,7 @@ Png.prototype.decodeLineFilter = function( buffer , start , end , lastLineStart 
 			c = i > 0 && lastLineStart >= 0 ? buffer[ lastLineStart + i - bytesPerPixel ] : 0 ;
 
 		// We modify in-place, it is possible and desirable since a, b and c requires the reconstructed bytes
-		buffer[ start + i ] = filters[ filterType ]( x , a , b , c ) ;
+		buffer[ start + i ] = filters[ filterType ].decode( x , a , b , c ) ;
 	}
 } ;
 
@@ -1500,7 +1534,8 @@ PortableImage.prototype.isoIndexedRgbaCompatibleToRgbaBlit = function( dst ) {
 
 
 PortableImage.prototype.updateFromImageData = function( imageData , mapping ) {
-	
+	throw new Error( "Not coded!" ) ;
+
 	// /!\ TODO /!\
 	
 	if ( ! mapping ) {
