@@ -32,7 +32,7 @@ async function test() {
 	var $canvas = document.getElementById( 'canvas' ) ;
 	var ctx = $canvas.getContext( '2d' ) ;
 
-	var portableImage = await PixPal.Png.loadImage( 'tiny.png' , { crc32: true } ) ;
+	var portableImage = await PixPal.Png.loadImage( 'tiny-indexed.png' , { crc32: true } ) ;
 	console.log( portableImage ) ;
 
 	var imageDataParams = { scaleX: 20 , scaleY: 20 } ;
@@ -82,7 +82,7 @@ async function test2() {
 	var $canvas = document.getElementById( 'canvas' ) ;
 	var ctx = $canvas.getContext( '2d' ) ;
 
-	var portableImage = await PixPal.Png.loadImage( 'tiny.png' , { crc32: true } ) ;
+	var portableImage = await PixPal.Png.loadImage( 'tiny-indexed.png' , { crc32: true } ) ;
 	console.log( portableImage ) ;
 
 	//ctx.fillStyle = "green"; ctx.fillRect(0, 0, 100, 100);
