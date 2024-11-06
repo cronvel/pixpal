@@ -874,7 +874,7 @@ Png.prototype.generateImageData = async function() {
 
 	console.log( "lineByteLength:" , lineByteLength ) ;
 	for ( let y = 0 ; y < this.height ; y ++ ) {
-		this.decodeLineFilter( buffer , y * lineByteLength , ( y + 1 ) * lineByteLength , y > 0 ? ( y - 1 ) * lineByteLength : - 1 ) ;
+		this.decodeLineFilter( buffer , y * lineByteLength , ( y + 1 ) * lineByteLength , ( y - 1 ) * lineByteLength ) ;	// Note: negative number = no previous line
 		this.extractLine( buffer , y * lineByteLength + 1 , lineByteLength - 1 , y * pixelBufferLineByteLength ) ;
 	}
 
@@ -900,12 +900,12 @@ Png.prototype.extractLine = function( buffer , start , byteLength , pixelBufferS
 Png.prototype.decodeLineFilter = function( buffer , start , end , lastLineStart ) {
 	var filterType = buffer[ start ] ;
 	if ( filterType === 0 ) { return ; }	// filter 0 doesn't change anything
-	//console.log( "Watch out! FilterType is not 0! Filter:" , filterType , filters[ filterType ] ) ;
+	//console.log( "Watch out! FilterType is not 0! Filter:" , filterType ) ;
 	if ( ! filters[ filterType ] ) { throw new Error( "Unknown filter type: " + filterType ) ; }
 
-	var bytesPerPixel = Math.ceil( this.bitsPerPixels / 8 ) ;
+	var bytesPerPixel = Math.ceil( this.bitsPerPixel / 8 ) ;
 
-	for ( let i = 0 , imax = end - start ; i < imax ; i ++ ) {
+	for ( let i = 1 , imax = end - start ; i < imax ; i ++ ) {
 		/*
 			We use the same byte names than in the PNG spec (https://www.w3.org/TR/png-3/#9Filter-types):
 
@@ -914,9 +914,9 @@ Png.prototype.decodeLineFilter = function( buffer , start , end , lastLineStart 
 		*/
 
 		let x = buffer[ start + i ] ,
-			a = i > 0 ? buffer[ start + i - bytesPerPixel ] : 0 ,
+			a = i > bytesPerPixel ? buffer[ start + i - bytesPerPixel ] : 0 ,
 			b = lastLineStart >= 0 ? buffer[ lastLineStart + i ] : 0 ,
-			c = i > 0 && lastLineStart >= 0 ? buffer[ lastLineStart + i - bytesPerPixel ] : 0 ;
+			c = i > bytesPerPixel && lastLineStart >= 0 ? buffer[ lastLineStart + i - bytesPerPixel ] : 0 ;
 
 		// We modify in-place, it is possible and desirable since a, b and c requires the reconstructed bytes
 		buffer[ start + i ] = filters[ filterType ].decode( x , a , b , c ) ;
@@ -938,23 +938,23 @@ filters[ 0 ] = {
 } ;
 
 filters[ 1 ] = {
-	encode: ( x , a , b , c ) => x - a ,
-	decode: ( x , a , b , c ) => x + a
+	encode: ( x , a , b , c ) => ( 256 + x - a ) % 256 ,
+	decode: ( x , a , b , c ) => ( x + a ) % 256
 } ;
 
 filters[ 2 ] = {
-	encode: ( x , a , b , c ) => x - b ,
-	decode: ( x , a , b , c ) => x + b
+	encode: ( x , a , b , c ) => ( 256 + x - b ) % 256 ,
+	decode: ( x , a , b , c ) => ( x + b ) % 256
 } ;
 
 filters[ 3 ] = {
-	encode: ( x , a , b , c ) => x - Math.floor( ( a + b ) / 2 ) ,
-	decode: ( x , a , b , c ) => x + Math.floor( ( a + b ) / 2 )
+	encode: ( x , a , b , c ) => ( 256 + x - Math.floor( ( a + b ) / 2 ) ) % 256 ,
+	decode: ( x , a , b , c ) => ( x + Math.floor( ( a + b ) / 2 ) ) % 256
 } ;
 
 filters[ 4 ] = {
-	encode: ( x , a , b , c ) => x - paethPredictor( a , b , c ) ,
-	decode: ( x , a , b , c ) => x + paethPredictor( a , b , c )
+	encode: ( x , a , b , c ) => ( 256 + x - paethPredictor( a , b , c ) ) % 256 ,
+	decode: ( x , a , b , c ) => ( x + paethPredictor( a , b , c ) ) % 256
 } ;
 
 // A no-brainer port of the pseudo-code for PaethPredictor directly from the PNG spec, see here: https://www.w3.org/TR/png-3/#9Filter-types
@@ -1354,12 +1354,12 @@ PortableImage.prototype.updateImageData = function( imageData , params = {} ) {
 	if ( ! mapping ) {
 		if ( imageData.width === this.width && imageData.height === this.height ) {
 			if ( this.indexed ) {
-				if ( this.isRgbCompatible ) { return this.isoIndexedRgbCompatibleToRgbaBlit( imageData.data ) ; }
 				if ( this.isRgbaCompatible ) { return this.isoIndexedRgbaCompatibleToRgbaBlit( imageData.data ) ; }
+				if ( this.isRgbCompatible ) { return this.isoIndexedRgbCompatibleToRgbaBlit( imageData.data ) ; }
 			}
 			else {
-				if ( this.isRgbCompatible ) { return this.isoRgbCompatibleToRgbaBlit( imageData.data ) ; }
 				if ( this.isRgbaCompatible ) { return this.isoRgbaCompatibleToRgbaBlit( imageData.data ) ; }
+				if ( this.isRgbCompatible ) { return this.isoRgbCompatibleToRgbaBlit( imageData.data ) ; }
 			}
 		}
 		
@@ -1419,7 +1419,7 @@ PortableImage.prototype.updateImageData = function( imageData , params = {} ) {
 			* the second value of the pair is the source channel index, it's null if the first of the pair should be used instead
 */
 PortableImage.blit = function( src , dst ) {
-	//console.warn( ".blit() used" ) ;
+	//console.warn( ".blit() used" , src , dst ) ;
 	var blitWidth = Math.min( dst.endX - dst.x , ( src.endX - src.x ) * dst.scaleX ) ,
 		blitHeight = Math.min( dst.endY - dst.y , ( src.endY - src.y ) * dst.scaleY ) ,
 		channels = Math.floor( dst.mapping.length / 2 ) ;
@@ -1447,7 +1447,7 @@ PortableImage.blit = function( src , dst ) {
 		palette: an array of array of values
 */
 PortableImage.indexedBlit = function( src , dst ) {
-	//console.warn( ".indexedBlit() used" ) ;
+	//console.warn( ".indexedBlit() used" , src , dst ) ;
 	var blitWidth = Math.min( dst.endX - dst.x , ( src.endX - src.x ) * dst.scaleX ) ,
 		blitHeight = Math.min( dst.endY - dst.y , ( src.endY - src.y ) * dst.scaleY ) ,
 		channels = Math.floor( dst.mapping.length / 2 ) ;
@@ -1469,7 +1469,7 @@ PortableImage.indexedBlit = function( src , dst ) {
 
 // Optimized Blit for RGB-compatible to RGBA
 PortableImage.prototype.isoRgbCompatibleToRgbaBlit = function( dst ) {
-	//console.warn( ".isoRgbCompatibleToRgbaBlit() used" ) ;
+	//console.warn( ".isoRgbCompatibleToRgbaBlit() used" , dst ) ;
 	for ( let i = 0 , imax = this.width * this.height ; i < imax ; i ++ ) {
 		let iSrc = i * this.bytesPerPixel ;
 		let iDst = i * 4 ;
@@ -1485,7 +1485,7 @@ PortableImage.prototype.isoRgbCompatibleToRgbaBlit = function( dst ) {
 
 // Optimized Blit for RGBA-compatible to RGBA
 PortableImage.prototype.isoRgbaCompatibleToRgbaBlit = function( dst ) {
-	//console.warn( ".isoRgbaCompatibleToRgbaBlit() used" ) ;
+	//console.warn( ".isoRgbaCompatibleToRgbaBlit() used" , dst , this ) ;
 	for ( let i = 0 , imax = this.width * this.height ; i < imax ; i ++ ) {
 		let iSrc = i * this.bytesPerPixel ;
 		let iDst = i * 4 ;
@@ -1501,7 +1501,7 @@ PortableImage.prototype.isoRgbaCompatibleToRgbaBlit = function( dst ) {
 
 // Optimized Blit for Indexed RGB-compatible to RGBA
 PortableImage.prototype.isoIndexedRgbCompatibleToRgbaBlit = function( dst ) {
-	//console.warn( ".isoIndexedRgbCompatibleToRgbaBlit() used" ) ;
+	//console.warn( ".isoIndexedRgbCompatibleToRgbaBlit() used" , dst ) ;
 	for ( let i = 0 , imax = this.width * this.height ; i < imax ; i ++ ) {
 		let iSrc = i * this.bytesPerPixel ;
 		let iDst = i * 4 ;
@@ -1518,7 +1518,7 @@ PortableImage.prototype.isoIndexedRgbCompatibleToRgbaBlit = function( dst ) {
 
 // Optimized Blit for Indexed RGBA-compatible to RGBA
 PortableImage.prototype.isoIndexedRgbaCompatibleToRgbaBlit = function( dst ) {
-	//console.warn( ".isoIndexedRgbaCompatibleToRgbaBlit() used" ) ;
+	//console.warn( ".isoIndexedRgbaCompatibleToRgbaBlit() used" , dst ) ;
 	for ( let i = 0 , imax = this.width * this.height ; i < imax ; i ++ ) {
 		let iSrc = i * this.bytesPerPixel ;
 		let iDst = i * 4 ;

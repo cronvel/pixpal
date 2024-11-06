@@ -82,11 +82,12 @@ async function testTrueColor() {
 	var $canvas = document.getElementById( 'canvas' ) ;
 	var ctx = $canvas.getContext( '2d' ) ;
 
-	var portableImage = await PixPal.Png.loadImage( 'tiny-true-color.png' , { crc32: true } ) ;
+	var portableImage = await PixPal.Png.loadImage( 'tiny-rgba.png' , { crc32: true } ) ;
 	console.log( portableImage ) ;
 
 	//ctx.fillStyle = "green"; ctx.fillRect(0, 0, 100, 100);
 
+	//var imageDataParams = {} ;
 	var imageDataParams = { scaleX: 20 , scaleY: 20 } ;
 	var imageData = portableImage.createImageData( imageDataParams ) ;
 	ctx.putImageData( imageData , 0 , 0 ) ;
