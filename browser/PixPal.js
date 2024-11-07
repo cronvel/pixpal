@@ -474,7 +474,7 @@ Png.prototype.toImage = function() {
 			params.channels = [ 'gray' ] ;
 			break ;
 		case Png.COLOR_TYPE_GRAYSCALE_ALPHA :
-			params.channels = [ 'gray' , 'A' ] ;
+			params.channels = [ 'gray' , 'alpha' ] ;
 			break ;
 		case Png.COLOR_TYPE_INDEXED :
 			params.indexed = true ;
@@ -579,8 +579,8 @@ Png.fromImage = function( portableImage ) {
 		pixelBuffer: portableImage.pixelBuffer
 	} ;
 
-	if ( ! portableImage.isRgb && ! portableImage.isRgba ) {
-		throw new Error( "The image is not supported, RGB or RGBA channels are required" ) ;
+	if ( ! portableImage.isRgb && ! portableImage.isRgba && ! portableImage.isGray && ! portableImage.isGrayAlpha ) {
+		throw new Error( "The image is not supported, RGB, RGBA, Gray, or Gray+Alpha channels are required" ) ;
 	}
 
 	if ( portableImage.indexed ) {
@@ -592,6 +592,12 @@ Png.fromImage = function( portableImage ) {
 	}
 	else if ( portableImage.isRgb ) {
 		params.colorType = Png.COLOR_TYPE_RGB ;
+	}
+	else if ( portableImage.isGrayAlpha ) {
+		params.colorType = Png.COLOR_TYPE_GRAYSCALE_ALPHA ;
+	}
+	else if ( portableImage.isGray ) {
+		params.colorType = Png.COLOR_TYPE_GRAYSCALE ;
 	}
 
 	return Png.createEncoder( params ) ;
@@ -1155,6 +1161,11 @@ function PortableImage( params = {} ) {
 	this.isRgbaCompatible = this.channels.length >= 4 && this.isRgbCompatible && this.channels[ 3 ] === 'alpha' ;
 	this.isRgb = this.isRgbCompatible && this.channels.length === 3 ;
 	this.isRgba = this.isRgbaCompatible && this.channels.length === 4 ;
+
+	this.isGrayCompatible = this.channels.length >= 1 && this.channels[ 0 ] === 'gray' ;
+	this.isGrayAlphaCompatible = this.channels.length >= 2 && this.isGrayCompatible && this.channels[ 1 ] === 'alpha' ;
+	this.isGray = this.isGrayCompatible && this.channels.length === 1 ;
+	this.isGrayAlpha = this.isGrayAlphaCompatible && this.channels.length === 2 ;
 }
 
 module.exports = PortableImage ;
@@ -1163,6 +1174,8 @@ module.exports = PortableImage ;
 
 PortableImage.RGB = [ 'red' , 'green' , 'blue' ] ;
 PortableImage.RGBA = [ 'red' , 'green' , 'blue' , 'alpha' ] ;
+PortableImage.GRAY = [ 'gray' ] ;
+PortableImage.GRAY_ALPHA = [ 'gray' , 'alpha' ] ;
 
 
 
@@ -1403,6 +1416,8 @@ PortableImage.prototype.updateImageData = function( imageData , params = {} ) {
 
 		if ( this.isRgbaCompatible ) { mapping = PortableImage.RGBA_COMPATIBLE_TO_RGBA_MAPPING ; }
 		else if ( this.isRgbCompatible ) { mapping = PortableImage.RGB_COMPATIBLE_TO_RGBA_MAPPING ; }
+		else if ( this.isGrayAlphaCompatible ) { mapping = PortableImage.GRAY_ALPHA_COMPATIBLE_TO_RGBA_MAPPING ; }
+		else if ( this.isGrayCompatible ) { mapping = PortableImage.GRAY_COMPATIBLE_TO_RGBA_MAPPING ; }
 		else { throw new Error( "Mapping required for image that are not RGB/RGBA compatible" ) ; }
 	}
 
@@ -1461,7 +1476,7 @@ PortableImage.prototype.updateImageData = function( imageData , params = {} ) {
 			* the second value of the pair is the source channel index, it's null if the first of the pair should be used instead
 */
 PortableImage.blit = function( src , dst ) {
-	console.warn( ".blit() used" , src , dst ) ;
+	//console.warn( ".blit() used" , src , dst ) ;
 	var blitWidth = Math.min( dst.endX - dst.x , ( src.endX - src.x ) * dst.scaleX ) ,
 		blitHeight = Math.min( dst.endY - dst.y , ( src.endY - src.y ) * dst.scaleY ) ,
 		channels = Math.floor( dst.mapping.length / 2 ) ;
@@ -1707,16 +1722,16 @@ PortableImage.RGB_COMPATIBLE_TO_RGBA_MAPPING = new DirectChannelMappingWithDefau
 	null , 255
 ] ) ;
 
-PortableImage.GRAYSCALE_ALPHA_COMPATIBLE_TO_RGBA_MAPPING = new DirectChannelMapping( [ 0 , 0 , 0 , 1 ] ) ;
+PortableImage.GRAY_ALPHA_COMPATIBLE_TO_RGBA_MAPPING = new DirectChannelMapping( [ 0 , 0 , 0 , 1 ] ) ;
 
-PortableImage.GRAYSCALE_COMPATIBLE_TO_RGBA_MAPPING = new DirectChannelMappingWithDefault( [
+PortableImage.GRAY_COMPATIBLE_TO_RGBA_MAPPING = new DirectChannelMappingWithDefault( [
 	0 , null ,
 	0 , null ,
 	0 , null ,
 	null , 255
 ] ) ;
 
-PortableImage.RGBA_COMPATIBLE_TO_GRAYSCALE_ALPHA_MAPPING = new CompositeChannelMapping(
+PortableImage.RGBA_COMPATIBLE_TO_GRAY_ALPHA_MAPPING = new CompositeChannelMapping(
 	[
 		1 / 3 , 1 / 3 , 1 / 3 , 0 , 0 ,
 		0 , 0 , 0 , 1 , 0
@@ -1724,7 +1739,7 @@ PortableImage.RGBA_COMPATIBLE_TO_GRAYSCALE_ALPHA_MAPPING = new CompositeChannelM
 	4
 ) ;
 
-PortableImage.RGB_COMPATIBLE_TO_GRAYSCALE_ALPHA_MAPPING = new CompositeChannelMapping(
+PortableImage.RGB_COMPATIBLE_TO_GRAY_ALPHA_MAPPING = new CompositeChannelMapping(
 	[
 		1 / 3 , 1 / 3 , 1 / 3 , 0 ,
 		0 , 0 , 0 , 255

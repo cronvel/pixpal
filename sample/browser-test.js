@@ -83,9 +83,12 @@ async function testTrueColor() {
 		$canvas = document.getElementById( 'canvas' ) ,
 		ctx = $canvas.getContext( '2d' ) ;
 
-	filename = 'tiny-rgba.png' ;
+	//filename = 'tiny-rgba.png' ;
+	filename = 'tiny-rgb.png' ;
 	//filename = 'tiny-rgba-2.png' ;
 	//filename = 'tiny-indexed.png' ;
+	//filename = 'tiny-grayscale.png' ;
+	//filename = 'tiny-grayscale-alpha.png' ;
 	//filename = 'spectrum-and-alpha.png' ;
 	var portableImage = await PixPal.Png.loadImage( filename , { crc32: true } ) ;
 	console.log( portableImage ) ;
