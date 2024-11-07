@@ -339,7 +339,7 @@ function Png() {
 	this.palette = [] ;
 	
 	// tRNS
-	this.transparencyColor = null ;	// transperancy color, also known as color-key
+	this.transparencyColorKey = null ;	// transperancy color, also known as color-key
 
 	// bKGD
 	this.backgroundColor = null ;
@@ -460,13 +460,28 @@ Png.prototype.toImage = function() {
 	var params = {
 		width: this.width ,
 		height: this.height ,
-		indexed: this.colorType === Png.COLOR_TYPE_INDEXED ,
 		pixelBuffer: this.pixelBuffer
 	} ;
 
-	if ( params.indexed ) { params.palette = this.palette ; }
-	
-	params.channels = PortableImage.RGBA ;
+	switch ( this.colorType ) {
+		case Png.COLOR_TYPE_RGB :
+			params.channels = PortableImage.RGB ;
+			break ;
+		case Png.COLOR_TYPE_RGBA :
+			params.channels = PortableImage.RGBA ;
+			break ;
+		case Png.COLOR_TYPE_GRAYSCALE :
+			params.channels = [ 'gray' ] ;
+			break ;
+		case Png.COLOR_TYPE_GRAYSCALE_ALPHA :
+			params.channels = [ 'gray' , 'A' ] ;
+			break ;
+		case Png.COLOR_TYPE_INDEXED :
+			params.indexed = true ;
+			params.palette = this.palette ;
+			params.channels = PortableImage.RGBA ;
+			break ;
+	}
 
 	return new PortableImage( params ) ;
 } ;
@@ -558,13 +573,28 @@ Png.prototype.download = async function( filename , options = {} ) {
 
 
 Png.fromImage = function( portableImage ) {
-	return Png.createEncoder( {
+	var params = {
 		width: portableImage.width ,
 		height: portableImage.height ,
-		colorType: Png.COLOR_TYPE_INDEXED ,
-		palette: portableImage.palette ,
 		pixelBuffer: portableImage.pixelBuffer
-	} ) ;
+	} ;
+
+	if ( ! portableImage.isRgb && ! portableImage.isRgba ) {
+		throw new Error( "The image is not supported, RGB or RGBA channels are required" ) ;
+	}
+
+	if ( portableImage.indexed ) {
+		params.colorType = Png.COLOR_TYPE_INDEXED ;
+		params.palette = portableImage.palette ;
+	}
+	else if ( portableImage.isRgba ) {
+		params.colorType = Png.COLOR_TYPE_RGBA ;
+	}
+	else if ( portableImage.isRgb ) {
+		params.colorType = Png.COLOR_TYPE_RGB ;
+	}
+
+	return Png.createEncoder( params ) ;
 } ;
 
 
@@ -713,15 +743,15 @@ chunkDecoders.tRNS = function( readableBuffer , options ) {
 			let r = Math.min( 255 , readableBuffer.readUInt16BE() << ( 8 - this.bitDepth ) ) ;
 			let g = Math.min( 255 , readableBuffer.readUInt16BE() << ( 8 - this.bitDepth ) ) ;
 			let b = Math.min( 255 , readableBuffer.readUInt16BE() << ( 8 - this.bitDepth ) ) ;
-			this.transparencyColor = [ r , g , b ] ;
-			console.log( "bKGD:" , this.backgroundColor ) ;
+			this.transparencyColorKey = [ r , g , b ] ;
+			console.log( "tRNS:" , this.transparencyColorKey ) ;
 			break ;
 		}
 		case Png.COLOR_TYPE_GRAYSCALE :
 		case Png.COLOR_TYPE_GRAYSCALE_ALPHA : {
 			let grayscale = Math.min( 255 , readableBuffer.readUInt16BE() << ( 8 - this.bitDepth ) ) ;
-			this.transparencyColor = [ grayscale ] ;
-			console.log( "bKGD:" , this.backgroundColor ) ;
+			this.transparencyColorKey = [ grayscale ] ;
+			console.log( "tRNS:" , this.transparencyColorKey ) ;
 			break ;
 		}
 		case Png.COLOR_TYPE_INDEXED : {
@@ -740,17 +770,32 @@ chunkDecoders.tRNS = function( readableBuffer , options ) {
 
 
 chunkEncoders.tRNS = function( options ) {
-	if ( this.colorType !== Png.COLOR_TYPE_INDEXED || ! this.palette.length ) { return ; }
-
-	let transparentIndexes = [] ;
-
-	for ( let colorIndex = 0 ; colorIndex < this.palette.length ; colorIndex ++ ) {
-		if ( this.palette[ colorIndex ][ 3 ] < 128 ) { transparentIndexes.push( colorIndex ) ; }
+	switch ( this.colorType ) {
+		case Png.COLOR_TYPE_RGBA :
+		case Png.COLOR_TYPE_GRAYSCALE_ALPHA : {
+			// If there is an alpha channel, no need to save a tRNS
+			return ;
+		}
+		case Png.COLOR_TYPE_RGB : {
+			if ( ! this.transparencyColorKey ) { return ; }
+			let buffer = Buffer.allocUnsafe( 6 ) ;
+			buffer.writeUInt16BE( this.transparencyColorKey[ 0 ] >> ( 8 - this.bitDepth ) , 0 ) ;
+			buffer.writeUInt16BE( this.transparencyColorKey[ 1 ] >> ( 8 - this.bitDepth ) , 2 ) ;
+			buffer.writeUInt16BE( this.transparencyColorKey[ 2 ] >> ( 8 - this.bitDepth ) , 4 ) ;
+            return buffer ;
+		}
+		case Png.COLOR_TYPE_GRAYSCALE : {
+			if ( ! this.transparencyColorKey ) { return ; }
+			let buffer = Buffer.allocUnsafe( 2 ) ;
+			buffer.writeUInt16BE( this.transparencyColorKey[ 0 ] >> ( 8 - this.bitDepth ) , 0 ) ;
+            return buffer ;
+			let grayscale = Math.min( 255 , readableBuffer.readUInt16BE() << ( 8 - this.bitDepth ) ) ;
+		}
+		case Png.COLOR_TYPE_INDEXED : {
+			if ( ! this.palette.length ) { return ; }
+			return Buffer.from( this.palette.map( color => color[ 3 ] ) ) ;
+		}
 	}
-
-	if ( ! transparentIndexes.length ) { return ; }
-
-	return Buffer.from( transparentIndexes ) ;
 } ;
 
 
@@ -852,8 +897,6 @@ chunkEncoders.IEND = function() {
 
 
 Png.prototype.generateImageData = async function() {
-	//if ( this.colorType !== Png.COLOR_TYPE_INDEXED ) { throw new Error( "Unsupported color type for IDAT: " + this.colorType ) ; }
-
 	if ( this.interlaceMethod ) {
 		throw new Error( "Interlace methods are unsupported (IDAT): " + this.interlaceMethod ) ;
 	}
@@ -872,7 +915,7 @@ Png.prototype.generateImageData = async function() {
 		throw new Error( "Expecting a decompressed buffer of length of " + expectedBufferLength + " but got: " + buffer.length ) ;
 	}
 
-	console.log( "lineByteLength:" , lineByteLength ) ;
+	//console.log( "lineByteLength:" , lineByteLength ) ;
 	for ( let y = 0 ; y < this.height ; y ++ ) {
 		this.decodeLineFilter( buffer , y * lineByteLength , ( y + 1 ) * lineByteLength , ( y - 1 ) * lineByteLength ) ;	// Note: negative number = no previous line
 		this.extractLine( buffer , y * lineByteLength + 1 , lineByteLength - 1 , y * pixelBufferLineByteLength ) ;
@@ -1062,7 +1105,7 @@ async function deflate( buffer ) {
 	Params:
 		width: image width in pixel
 		height: image height in pixel
-		channels: the channels, default to [ 'R' , 'G' , 'B' , 'A' ] or PortableImage.RGBA
+		channels: the channels, default to [ 'red' , 'green' , 'blue' , 'alpha' ] or PortableImage.RGBA
 		indexed: (boolean) it uses a palette, up to 256 entries, each pixel is a 1-Byte index
 		palette: (array of array of integers) force indexed a pass an array of array of channel value
 		pixelBuffer: (Buffer or Uint8Array) the buffer containing all the pixel data
@@ -1102,14 +1145,14 @@ function PortableImage( params = {} ) {
 	if ( Array.isArray( params.palette ) ) {
 		this.setPalette( params.palette ) ;
 	}
-	
+
 	this.channelIndex = {} ;
 	for ( let i = 0 ; i < this.channels.length ; i ++ ) {
 		this.channelIndex[ this.channels[ i ] ] = i ;
 	}
 
-	this.isRgbCompatible = this.channels.length >= 3 && this.channels[ 0 ] === 'R' && this.channels[ 1 ] === 'G' && this.channels[ 2 ] === 'B' ;
-	this.isRgbaCompatible = this.channels.length >= 4 && this.isRgbCompatible && this.channels[ 3 ] === 'A' ;
+	this.isRgbCompatible = this.channels.length >= 3 && this.channels[ 0 ] === 'red' && this.channels[ 1 ] === 'green' && this.channels[ 2 ] === 'blue' ;
+	this.isRgbaCompatible = this.channels.length >= 4 && this.isRgbCompatible && this.channels[ 3 ] === 'alpha' ;
 	this.isRgb = this.isRgbCompatible && this.channels.length === 3 ;
 	this.isRgba = this.isRgbaCompatible && this.channels.length === 4 ;
 }
@@ -1118,8 +1161,8 @@ module.exports = PortableImage ;
 
 
 
-PortableImage.RGB = [ 'R' , 'G' , 'B' ] ;
-PortableImage.RGBA = [ 'R' , 'G' , 'B' , 'A' ] ;
+PortableImage.RGB = [ 'red' , 'green' , 'blue' ] ;
+PortableImage.RGBA = [ 'red' , 'green' , 'blue' , 'alpha' ] ;
 
 
 
@@ -1229,15 +1272,10 @@ PortableImage.prototype.getClosestPaletteIndex = ( channelValues ) => {
 
 
 
-PortableImage.RGB_COMPATIBLE_TO_RGBA_MAPPING = [ null , 0 , null , 1 , null , 2 , 255 , null ] ;
-PortableImage.RGBA_COMPATIBLE_TO_RGBA_MAPPING = [ null , 0 , null , 1 , null , 2 , null , 3 ] ;
-
-
-
 /*
 	Copy to another PortableImage instance.
 */
-PortableImage.prototype.copyTo = function( portableImage , customMapping = null ) {
+PortableImage.prototype.copyTo = function( portableImage , mapping = null ) {
 	let src = {
 		buffer: this.pixelBuffer ,
 		width: this.width ,
@@ -1261,7 +1299,7 @@ PortableImage.prototype.copyTo = function( portableImage , customMapping = null 
 
 		scaleX: 1 ,
 		scaleY: 1 ,
-		mapping: customMapping || this.getMappingTo( portableImage )
+		mapping: mapping || this.getMappingTo( portableImage )
 	} ;
 	//console.log( "### Mapping: " , dst.mapping ) ;
 
@@ -1294,10 +1332,10 @@ PortableImage.prototype.createImageData = function( params = {} ) {
 */
 
 PortableImage.DEFAULT_CHANNEL_VALUES = {
-	R: 0 ,
-	G: 0 ,
-	B: 0 ,
-	A: 255
+	red: 0 ,
+	green: 0 ,
+	blue: 0 ,
+	alpha: 255
 } ;
 
 // Create the mapping to another PortableImage
@@ -1306,42 +1344,42 @@ PortableImage.prototype.getMappingTo = function( toPortableImage , defaultChanne
 } ;
 
 PortableImage.prototype.getMappingToChannels = function( toChannels , defaultChannelValues = PortableImage.DEFAULT_CHANNEL_VALUES ) {
-	var mapping = new Array( toChannels.length * 2 ) ;
+	var matrix = new Array( toChannels.length * 2 ) ;
 
 	for ( let index = 0 ; index < toChannels.length ; index ++ ) {
 		let channel = toChannels[ index ] ;
 
 		if ( Object.hasOwn( this.channelIndex , channel ) ) {
-			mapping[ index * 2 ] = null ;
-			mapping[ index * 2 + 1 ] = this.channelIndex[ channel ] ;
+			matrix[ index * 2 ] = this.channelIndex[ channel ] ;
+			matrix[ index * 2 + 1 ] = null ;
 		}
 		else {
-			mapping[ index * 2 ] = defaultChannelValues[ channel ] ?? 0 ;
-			mapping[ index * 2 + 1 ] = null ;
+			matrix[ index * 2 ] = null ;
+			matrix[ index * 2 + 1 ] = defaultChannelValues[ channel ] ?? 0 ;
 		}
 	}
 
-	return mapping ;
+	return new DirectChannelMappingWithDefault( matrix ) ;
 } ;
 
 PortableImage.getMapping = function( fromChannels , toChannels , defaultChannelValues = PortableImage.DEFAULT_CHANNEL_VALUES ) {
-	var mapping = new Array( toChannels.length * 2 ) ;
+	var matrix = new Array( toChannels.length * 2 ) ;
 
 	for ( let index = 0 ; index < toChannels.length ; index ++ ) {
 		let channel = toChannels[ index ] ;
 		let indexOf = fromChannels.indexOf( channel ) ;
 
 		if ( indexOf >= 0 ) {
-			mapping[ index * 2 ] = null ;
-			mapping[ index * 2 + 1 ] = indexOf ;
+			matrix[ index * 2 ] = indexOf ;
+			matrix[ index * 2 + 1 ] = null ;
 		}
 		else {
-			mapping[ index * 2 ] = defaultChannelValues[ channel ] ?? 0 ;
-			mapping[ index * 2 + 1 ] = null ;
+			matrix[ index * 2 ] = null ;
+			matrix[ index * 2 + 1 ] = defaultChannelValues[ channel ] ?? 0 ;
 		}
 	}
 
-	return mapping ;
+	return new DirectChannelMappingWithDefault( matrix ) ;
 } ;
 
 
@@ -1362,11 +1400,13 @@ PortableImage.prototype.updateImageData = function( imageData , params = {} ) {
 				if ( this.isRgbCompatible ) { return this.isoRgbCompatibleToRgbaBlit( imageData.data ) ; }
 			}
 		}
-		
+
 		if ( this.isRgbaCompatible ) { mapping = PortableImage.RGBA_COMPATIBLE_TO_RGBA_MAPPING ; }
 		else if ( this.isRgbCompatible ) { mapping = PortableImage.RGB_COMPATIBLE_TO_RGBA_MAPPING ; }
 		else { throw new Error( "Mapping required for image that are not RGB/RGBA compatible" ) ; }
 	}
+
+	//console.warn( "Mapping:" , mapping ) ;
 
 	let src = {
 		buffer: this.pixelBuffer ,
@@ -1376,7 +1416,8 @@ PortableImage.prototype.updateImageData = function( imageData , params = {} ) {
 		x: 0 ,
 		y: 0 ,
 		endX: this.width ,
-		endY: this.height
+		endY: this.height ,
+		channels: this.channels.length
 	} ;
 
 	let dst = {
@@ -1390,6 +1431,7 @@ PortableImage.prototype.updateImageData = function( imageData , params = {} ) {
 		endY: imageData.height ,
 		scaleX ,
 		scaleY ,
+		channels: 4 ,
 		mapping
 	} ;
 
@@ -1419,7 +1461,7 @@ PortableImage.prototype.updateImageData = function( imageData , params = {} ) {
 			* the second value of the pair is the source channel index, it's null if the first of the pair should be used instead
 */
 PortableImage.blit = function( src , dst ) {
-	//console.warn( ".blit() used" , src , dst ) ;
+	console.warn( ".blit() used" , src , dst ) ;
 	var blitWidth = Math.min( dst.endX - dst.x , ( src.endX - src.x ) * dst.scaleX ) ,
 		blitHeight = Math.min( dst.endY - dst.y , ( src.endY - src.y ) * dst.scaleY ) ,
 		channels = Math.floor( dst.mapping.length / 2 ) ;
@@ -1428,10 +1470,7 @@ PortableImage.blit = function( src , dst ) {
 		for ( let xOffset = 0 ; xOffset < blitWidth ; xOffset ++ ) {
 			let iDst = ( ( dst.y + yOffset ) * dst.width + ( dst.x + xOffset ) ) * dst.bytesPerPixel ;
 			let iSrc = ( Math.floor( src.y + yOffset / dst.scaleY ) * src.width + Math.floor( src.x + xOffset / dst.scaleX ) ) * src.bytesPerPixel ;
-
-			for ( let c = 0 ; c < channels ; c ++ ) {
-				dst.buffer[ iDst + c ] = dst.mapping[ c * 2 ] ?? src.buffer[ iSrc + dst.mapping[ c * 2 + 1 ] ] ;
-			}
+			dst.mapping.map( src , dst , iSrc , iDst ) ;
 		}
 	}
 } ;
@@ -1457,10 +1496,7 @@ PortableImage.indexedBlit = function( src , dst ) {
 			let iDst = ( ( dst.y + yOffset ) * dst.width + ( dst.x + xOffset ) ) * dst.bytesPerPixel ;
 			let iSrc = ( Math.floor( src.y + yOffset / dst.scaleY ) * src.width + Math.floor( src.x + xOffset / dst.scaleX ) ) * src.bytesPerPixel ;
 			let channelValues = src.palette[ src.buffer[ iSrc ] ] ;
-
-			for ( let c = 0 ; c < channels ; c ++ ) {
-				dst.buffer[ iDst + c ] = dst.mapping[ c * 2 ] ?? channelValues[ dst.mapping[ c * 2 + 1 ] ] ;
-			}
+			dst.mapping.map( src , dst , 0 , iDst , channelValues ) ;
 		}
 	}
 } ;
@@ -1537,7 +1573,7 @@ PortableImage.prototype.updateFromImageData = function( imageData , mapping ) {
 	throw new Error( "Not coded!" ) ;
 
 	// /!\ TODO /!\
-	
+
 	if ( ! mapping ) {
 		if ( this.isRgbaCompatible ) { mapping = PortableImage.RGBA_COMPATIBLE_TO_RGBA_MAPPING ; }
 		else if ( this.isRgbCompatible ) { mapping = PortableImage.RGB_COMPATIBLE_TO_RGBA_MAPPING ; }
@@ -1547,7 +1583,7 @@ PortableImage.prototype.updateFromImageData = function( imageData , mapping ) {
 	if ( imageData.width !== this.width || imageData.height !== this.height ) {
 		throw new Error( ".updateFromImageData(): width and/or height mismatch" ) ;
 	}
-	
+
 	for ( let i = 0 , imax = this.width * this.height ; i < imax ; i ++ ) {
 		let iDst = i * this.bytesPerPixel ;
 		let iSrc = i * 4 ;
@@ -1568,6 +1604,133 @@ PortableImage.prototype.updateFromImageData = function( imageData , mapping ) {
 		this.pixelBuffer[ iDst + mapping[ 3 ] ] = imageData[ iSrc + 3 ] ;
 	}
 } ;
+
+
+
+// Channel mapping classes
+
+
+
+// Base class
+function Mapping() {
+	throw new Error( "Cannot instanciate the base Mapping class, use derived classes instead" ) ;
+}
+
+PortableImage.Mapping = Mapping ;
+Mapping.prototype.map = function() {} ;
+
+
+
+/*
+	Direct mapping of dst to src, each dst channel is copied from a src channel.
+	Each entry is a src channel index.
+*/
+function DirectChannelMapping( matrix ) {
+	this.matrix = matrix ;
+}
+
+DirectChannelMapping.prototype = Object.create( Mapping.prototype ) ;
+DirectChannelMapping.prototype.constructor = DirectChannelMapping ;
+PortableImage.DirectChannelMapping = DirectChannelMapping ;
+
+DirectChannelMapping.prototype.map = function( src , dst , iSrc , iDst , srcBuffer = src.buffer ) {
+	for ( let cDst = 0 ; cDst < dst.channels ; cDst ++ ) {
+		dst.buffer[ iDst + cDst ] = srcBuffer[ iSrc + this.matrix[ cDst ] ] ;
+	}
+} ;
+
+
+
+/*
+	Direct mapping of dst to src, each dst channel is copied from a src channel OR have a default value.
+	There are 2 entries per dst channel, the first one is a src channel index, the second one is a default value.
+	The default value is used unless its value is null.
+*/
+function DirectChannelMappingWithDefault( matrix ) {
+	this.matrix = matrix ;
+}
+
+DirectChannelMappingWithDefault.prototype = Object.create( Mapping.prototype ) ;
+DirectChannelMappingWithDefault.prototype.constructor = DirectChannelMappingWithDefault ;
+PortableImage.DirectChannelMappingWithDefault = DirectChannelMappingWithDefault ;
+
+DirectChannelMappingWithDefault.prototype.map = function( src , dst , iSrc , iDst , srcBuffer = src.buffer ) {
+	for ( let cDst = 0 ; cDst < dst.channels ; cDst ++ ) {
+		dst.buffer[ iDst + cDst ] = this.matrix[ cDst * 2 + 1 ] ?? srcBuffer[ iSrc + this.matrix[ cDst * 2 ] ] ;
+	}
+} ;
+
+
+
+/*
+	Composite mapping of the dst to src, each dst channel is composed by all src channels + one additional value.
+	There are ( src channels + 1 ) entries per dst channel, the last one is the additionnal value.
+*/
+function CompositeChannelMapping( matrix , srcChannelsUsed ) {
+	this.matrix = matrix ;
+	this.srcChannelsUsed = srcChannelsUsed ;
+}
+
+CompositeChannelMapping.prototype = Object.create( Mapping.prototype ) ;
+CompositeChannelMapping.prototype.constructor = CompositeChannelMapping ;
+PortableImage.CompositeChannelMapping = CompositeChannelMapping ;
+
+CompositeChannelMapping.prototype.map = function( src , dst , iSrc , iDst , srcBuffer = src.buffer ) {
+	let matrixIndex = 0 ;
+
+	for ( let cDst = 0 ; cDst < dst.channels ; cDst ++ ) {
+		let value = 0 ;
+
+		for ( let cSrc = 0 ; cSrc < this.srcChannelsUsed ; cSrc ++ ) {
+			value += srcBuffer[ iSrc + cSrc ] * this.matrix[ matrixIndex ++ ] ;
+		}
+
+		value += this.matrix[ matrixIndex ++ ] ;	// This is the additionnal value
+
+		dst.buffer[ iDst + cDst ] = Math.max( 0 , Math.min( 255 , Math.round( value ) ) ) ;
+	}
+} ;
+
+
+
+/*
+	Built-in channel mapping.
+	Should come after prototype definition, because of *.prototype = Object.create(...)
+*/
+
+PortableImage.RGBA_COMPATIBLE_TO_RGBA_MAPPING = new DirectChannelMapping( [ 0 , 1 , 2 , 3 ] ) ;
+
+PortableImage.RGB_COMPATIBLE_TO_RGBA_MAPPING = new DirectChannelMappingWithDefault( [
+	0 , null ,
+	1 , null ,
+	2 , null ,
+	null , 255
+] ) ;
+
+PortableImage.GRAYSCALE_ALPHA_COMPATIBLE_TO_RGBA_MAPPING = new DirectChannelMapping( [ 0 , 0 , 0 , 1 ] ) ;
+
+PortableImage.GRAYSCALE_COMPATIBLE_TO_RGBA_MAPPING = new DirectChannelMappingWithDefault( [
+	0 , null ,
+	0 , null ,
+	0 , null ,
+	null , 255
+] ) ;
+
+PortableImage.RGBA_COMPATIBLE_TO_GRAYSCALE_ALPHA_MAPPING = new CompositeChannelMapping(
+	[
+		1 / 3 , 1 / 3 , 1 / 3 , 0 , 0 ,
+		0 , 0 , 0 , 1 , 0
+	] ,
+	4
+) ;
+
+PortableImage.RGB_COMPATIBLE_TO_GRAYSCALE_ALPHA_MAPPING = new CompositeChannelMapping(
+	[
+		1 / 3 , 1 / 3 , 1 / 3 , 0 ,
+		0 , 0 , 0 , 255
+	] ,
+	3
+) ;
 
 
 }).call(this)}).call(this,require("buffer").Buffer)
