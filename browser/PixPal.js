@@ -1,4 +1,155 @@
 (function(f){if(typeof exports==="object"&&typeof module!=="undefined"){module.exports=f()}else if(typeof define==="function"&&define.amd){define([],f)}else{var g;if(typeof window!=="undefined"){g=window}else if(typeof global!=="undefined"){g=global}else if(typeof self!=="undefined"){g=self}else{g=this}g.PixPal = f()}})(function(){var define,module,exports;return (function(){function r(e,n,t){function o(i,f){if(!n[i]){if(!e[i]){var c="function"==typeof require&&require;if(!f&&c)return c(i,!0);if(u)return u(i,!0);var a=new Error("Cannot find module '"+i+"'");throw a.code="MODULE_NOT_FOUND",a}var p=n[i]={exports:{}};e[i][0].call(p.exports,function(r){var n=e[i][1][r];return o(n||r)},p,p.exports,r,e,n,t)}return n[i].exports}for(var u="function"==typeof require&&require,i=0;i<t.length;i++)o(t[i]);return o}return r})()({1:[function(require,module,exports){
+/*
+	PixPal
+
+	Copyright (c) 2024 Cédric Ronvel
+
+	The MIT License (MIT)
+
+	Permission is hereby granted, free of charge, to any person obtaining a copy
+	of this software and associated documentation files (the "Software"), to deal
+	in the Software without restriction, including without limitation the rights
+	to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+	copies of the Software, and to permit persons to whom the Software is
+	furnished to do so, subject to the following conditions:
+
+	The above copyright notice and this permission notice shall be included in all
+	copies or substantial portions of the Software.
+
+	THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+	IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+	FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+	AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+	LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+	OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+	SOFTWARE.
+*/
+
+"use strict" ;
+
+
+
+// Base class
+function Mapping() {
+	throw new Error( "Cannot instanciate the base Mapping class, use derived classes instead" ) ;
+}
+Mapping.prototype.map = function() {} ;
+module.exports = Mapping ;
+
+
+/*
+	Direct mapping of dst to src, each dst channel is copied from a src channel.
+	Each entry is a src channel index.
+*/
+function DirectChannelMapping( matrix ) {
+	this.matrix = matrix ;
+}
+
+DirectChannelMapping.prototype = Object.create( Mapping.prototype ) ;
+DirectChannelMapping.prototype.constructor = DirectChannelMapping ;
+Mapping.DirectChannelMapping = DirectChannelMapping ;
+
+DirectChannelMapping.prototype.map = function( src , dst , iSrc , iDst , srcBuffer = src.buffer ) {
+	for ( let cDst = 0 ; cDst < dst.channels ; cDst ++ ) {
+		dst.buffer[ iDst + cDst ] = srcBuffer[ iSrc + this.matrix[ cDst ] ] ;
+	}
+} ;
+
+
+
+/*
+	Direct mapping of dst to src, each dst channel is copied from a src channel OR have a default value.
+	There are 2 entries per dst channel, the first one is a src channel index, the second one is a default value.
+	The default value is used unless its value is null.
+*/
+function DirectChannelMappingWithDefault( matrix ) {
+	this.matrix = matrix ;
+}
+
+DirectChannelMappingWithDefault.prototype = Object.create( Mapping.prototype ) ;
+DirectChannelMappingWithDefault.prototype.constructor = DirectChannelMappingWithDefault ;
+Mapping.DirectChannelMappingWithDefault = DirectChannelMappingWithDefault ;
+
+DirectChannelMappingWithDefault.prototype.map = function( src , dst , iSrc , iDst , srcBuffer = src.buffer ) {
+	for ( let cDst = 0 ; cDst < dst.channels ; cDst ++ ) {
+		dst.buffer[ iDst + cDst ] = this.matrix[ cDst * 2 + 1 ] ?? srcBuffer[ iSrc + this.matrix[ cDst * 2 ] ] ;
+	}
+} ;
+
+
+
+/*
+	Composite mapping of the dst to src, each dst channel is composed by all src channels + one additional value.
+	There are ( src channels + 1 ) entries per dst channel, the last one is the additionnal value.
+*/
+function CompositeChannelMapping( matrix , srcChannelsUsed ) {
+	this.matrix = matrix ;
+	this.srcChannelsUsed = srcChannelsUsed ;
+}
+
+CompositeChannelMapping.prototype = Object.create( Mapping.prototype ) ;
+CompositeChannelMapping.prototype.constructor = CompositeChannelMapping ;
+Mapping.CompositeChannelMapping = CompositeChannelMapping ;
+
+CompositeChannelMapping.prototype.map = function( src , dst , iSrc , iDst , srcBuffer = src.buffer ) {
+	let matrixIndex = 0 ;
+
+	for ( let cDst = 0 ; cDst < dst.channels ; cDst ++ ) {
+		let value = 0 ;
+
+		for ( let cSrc = 0 ; cSrc < this.srcChannelsUsed ; cSrc ++ ) {
+			value += srcBuffer[ iSrc + cSrc ] * this.matrix[ matrixIndex ++ ] ;
+		}
+
+		value += this.matrix[ matrixIndex ++ ] ;	// This is the additionnal value
+
+		dst.buffer[ iDst + cDst ] = Math.max( 0 , Math.min( 255 , Math.round( value ) ) ) ;
+	}
+} ;
+
+
+
+/*
+	Built-in channel mapping.
+	Should come after prototype definition, because of *.prototype = Object.create(...)
+*/
+
+Mapping.RGBA_COMPATIBLE_TO_RGBA = new DirectChannelMapping( [ 0 , 1 , 2 , 3 ] ) ;
+
+Mapping.RGB_COMPATIBLE_TO_RGBA = new DirectChannelMappingWithDefault( [
+	0 , null ,
+	1 , null ,
+	2 , null ,
+	null , 255
+] ) ;
+
+Mapping.GRAY_ALPHA_COMPATIBLE_TO_RGBA = new DirectChannelMapping( [ 0 , 0 , 0 , 1 ] ) ;
+
+Mapping.GRAY_COMPATIBLE_TO_RGBA = new DirectChannelMappingWithDefault( [
+	0 , null ,
+	0 , null ,
+	0 , null ,
+	null , 255
+] ) ;
+
+Mapping.RGBA_COMPATIBLE_TO_GRAY_ALPHA = new CompositeChannelMapping(
+	[
+		1 / 3 , 1 / 3 , 1 / 3 , 0 , 0 ,
+		0 , 0 , 0 , 1 , 0
+	] ,
+	4
+) ;
+
+Mapping.RGB_COMPATIBLE_TO_GRAY_ALPHA = new CompositeChannelMapping(
+	[
+		1 / 3 , 1 / 3 , 1 / 3 , 0 ,
+		0 , 0 , 0 , 255
+	] ,
+	3
+) ;
+
+
+},{}],2:[function(require,module,exports){
 (function (Buffer){(function (){
 /*
 	PixPal
@@ -247,7 +398,7 @@ PixPal.prototype.toPng = function( options = {} ) {
 
 
 }).call(this)}).call(this,require("buffer").Buffer)
-},{"./Png.js":2,"./PortableImage.js":3,"buffer":8}],2:[function(require,module,exports){
+},{"./Png.js":3,"./PortableImage.js":4,"buffer":9}],3:[function(require,module,exports){
 (function (process,Buffer){(function (){
 /*
 	PixPal
@@ -1075,7 +1226,7 @@ async function deflate( buffer ) {
 
 
 }).call(this)}).call(this,require('_process'),require("buffer").Buffer)
-},{"./PortableImage.js":3,"_process":10,"buffer":8,"crc-32":4,"stream-kit/lib/SequentialReadBuffer.js":5,"stream-kit/lib/SequentialWriteBuffer.js":6}],3:[function(require,module,exports){
+},{"./PortableImage.js":4,"_process":11,"buffer":9,"crc-32":5,"stream-kit/lib/SequentialReadBuffer.js":6,"stream-kit/lib/SequentialWriteBuffer.js":7}],4:[function(require,module,exports){
 (function (Buffer){(function (){
 /*
 	PixPal
@@ -1169,6 +1320,14 @@ function PortableImage( params = {} ) {
 }
 
 module.exports = PortableImage ;
+
+
+
+const Mapping = PortableImage.Mapping = require( './Mapping.js' ) ;
+PortableImage.Mapping = Mapping ;
+PortableImage.DirectChannelMapping = Mapping.DirectChannelMapping ;
+PortableImage.DirectChannelMappingWithDefault = Mapping.DirectChannelMappingWithDefault ;
+PortableImage.CompositeChannelMapping = Mapping.CompositeChannelMapping ;
 
 
 
@@ -1327,17 +1486,6 @@ PortableImage.prototype.copyTo = function( portableImage , mapping = null ) {
 
 
 
-PortableImage.prototype.createImageData = function( params = {} ) {
-	var scaleX = params.scaleX ?? params.scale ?? 1 ,
-		scaleY = params.scaleY ?? params.scale ?? 1 ;
-
-	var imageData = new ImageData( this.width * scaleX , this.height * scaleY ) ;
-	this.updateImageData( imageData , params ) ;
-	return imageData ;
-} ;
-
-
-
 /*
 	Mapping is an array of twice the number of the channels, pairs of values :
 	* the first value of the pair is the channel fixed value, it's null if the second of the pair should be used instead
@@ -1397,6 +1545,17 @@ PortableImage.getMapping = function( fromChannels , toChannels , defaultChannelV
 
 
 
+PortableImage.prototype.createImageData = function( params = {} ) {
+	var scaleX = params.scaleX ?? params.scale ?? 1 ,
+		scaleY = params.scaleY ?? params.scale ?? 1 ;
+
+	var imageData = new ImageData( this.width * scaleX , this.height * scaleY ) ;
+	this.updateImageData( imageData , params ) ;
+	return imageData ;
+} ;
+
+
+
 PortableImage.prototype.updateImageData = function( imageData , params = {} ) {
 	var mapping = params.mapping ,
 		scaleX = params.scaleX ?? params.scale ?? 1 ,
@@ -1414,11 +1573,11 @@ PortableImage.prototype.updateImageData = function( imageData , params = {} ) {
 			}
 		}
 
-		if ( this.isRgbaCompatible ) { mapping = PortableImage.RGBA_COMPATIBLE_TO_RGBA_MAPPING ; }
-		else if ( this.isRgbCompatible ) { mapping = PortableImage.RGB_COMPATIBLE_TO_RGBA_MAPPING ; }
-		else if ( this.isGrayAlphaCompatible ) { mapping = PortableImage.GRAY_ALPHA_COMPATIBLE_TO_RGBA_MAPPING ; }
-		else if ( this.isGrayCompatible ) { mapping = PortableImage.GRAY_COMPATIBLE_TO_RGBA_MAPPING ; }
-		else { throw new Error( "Mapping required for image that are not RGB/RGBA compatible" ) ; }
+		if ( this.isRgbaCompatible ) { mapping = Mapping.RGBA_COMPATIBLE_TO_RGBA ; }
+		else if ( this.isRgbCompatible ) { mapping = Mapping.RGB_COMPATIBLE_TO_RGBA ; }
+		else if ( this.isGrayAlphaCompatible ) { mapping = Mapping.GRAY_ALPHA_COMPATIBLE_TO_RGBA ; }
+		else if ( this.isGrayCompatible ) { mapping = Mapping.GRAY_COMPATIBLE_TO_RGBA ; }
+		else { throw new Error( "Mapping required for image that are not RGB/RGBA/Grayscale/Grayscale+Alpha compatible" ) ; }
 	}
 
 	//console.warn( "Mapping:" , mapping ) ;
@@ -1590,8 +1749,8 @@ PortableImage.prototype.updateFromImageData = function( imageData , mapping ) {
 	// /!\ TODO /!\
 
 	if ( ! mapping ) {
-		if ( this.isRgbaCompatible ) { mapping = PortableImage.RGBA_COMPATIBLE_TO_RGBA_MAPPING ; }
-		else if ( this.isRgbCompatible ) { mapping = PortableImage.RGB_COMPATIBLE_TO_RGBA_MAPPING ; }
+		if ( this.isRgbaCompatible ) { mapping = Mapping.RGBA_COMPATIBLE_TO_RGBA ; }
+		else if ( this.isRgbCompatible ) { mapping = Mapping.RGB_COMPATIBLE_TO_RGBA ; }
 		else { throw new Error( "Mapping required for image that are not RGB/RGBA compatible" ) ; }
 	}
 
@@ -1621,135 +1780,8 @@ PortableImage.prototype.updateFromImageData = function( imageData , mapping ) {
 } ;
 
 
-
-// Channel mapping classes
-
-
-
-// Base class
-function Mapping() {
-	throw new Error( "Cannot instanciate the base Mapping class, use derived classes instead" ) ;
-}
-
-PortableImage.Mapping = Mapping ;
-Mapping.prototype.map = function() {} ;
-
-
-
-/*
-	Direct mapping of dst to src, each dst channel is copied from a src channel.
-	Each entry is a src channel index.
-*/
-function DirectChannelMapping( matrix ) {
-	this.matrix = matrix ;
-}
-
-DirectChannelMapping.prototype = Object.create( Mapping.prototype ) ;
-DirectChannelMapping.prototype.constructor = DirectChannelMapping ;
-PortableImage.DirectChannelMapping = DirectChannelMapping ;
-
-DirectChannelMapping.prototype.map = function( src , dst , iSrc , iDst , srcBuffer = src.buffer ) {
-	for ( let cDst = 0 ; cDst < dst.channels ; cDst ++ ) {
-		dst.buffer[ iDst + cDst ] = srcBuffer[ iSrc + this.matrix[ cDst ] ] ;
-	}
-} ;
-
-
-
-/*
-	Direct mapping of dst to src, each dst channel is copied from a src channel OR have a default value.
-	There are 2 entries per dst channel, the first one is a src channel index, the second one is a default value.
-	The default value is used unless its value is null.
-*/
-function DirectChannelMappingWithDefault( matrix ) {
-	this.matrix = matrix ;
-}
-
-DirectChannelMappingWithDefault.prototype = Object.create( Mapping.prototype ) ;
-DirectChannelMappingWithDefault.prototype.constructor = DirectChannelMappingWithDefault ;
-PortableImage.DirectChannelMappingWithDefault = DirectChannelMappingWithDefault ;
-
-DirectChannelMappingWithDefault.prototype.map = function( src , dst , iSrc , iDst , srcBuffer = src.buffer ) {
-	for ( let cDst = 0 ; cDst < dst.channels ; cDst ++ ) {
-		dst.buffer[ iDst + cDst ] = this.matrix[ cDst * 2 + 1 ] ?? srcBuffer[ iSrc + this.matrix[ cDst * 2 ] ] ;
-	}
-} ;
-
-
-
-/*
-	Composite mapping of the dst to src, each dst channel is composed by all src channels + one additional value.
-	There are ( src channels + 1 ) entries per dst channel, the last one is the additionnal value.
-*/
-function CompositeChannelMapping( matrix , srcChannelsUsed ) {
-	this.matrix = matrix ;
-	this.srcChannelsUsed = srcChannelsUsed ;
-}
-
-CompositeChannelMapping.prototype = Object.create( Mapping.prototype ) ;
-CompositeChannelMapping.prototype.constructor = CompositeChannelMapping ;
-PortableImage.CompositeChannelMapping = CompositeChannelMapping ;
-
-CompositeChannelMapping.prototype.map = function( src , dst , iSrc , iDst , srcBuffer = src.buffer ) {
-	let matrixIndex = 0 ;
-
-	for ( let cDst = 0 ; cDst < dst.channels ; cDst ++ ) {
-		let value = 0 ;
-
-		for ( let cSrc = 0 ; cSrc < this.srcChannelsUsed ; cSrc ++ ) {
-			value += srcBuffer[ iSrc + cSrc ] * this.matrix[ matrixIndex ++ ] ;
-		}
-
-		value += this.matrix[ matrixIndex ++ ] ;	// This is the additionnal value
-
-		dst.buffer[ iDst + cDst ] = Math.max( 0 , Math.min( 255 , Math.round( value ) ) ) ;
-	}
-} ;
-
-
-
-/*
-	Built-in channel mapping.
-	Should come after prototype definition, because of *.prototype = Object.create(...)
-*/
-
-PortableImage.RGBA_COMPATIBLE_TO_RGBA_MAPPING = new DirectChannelMapping( [ 0 , 1 , 2 , 3 ] ) ;
-
-PortableImage.RGB_COMPATIBLE_TO_RGBA_MAPPING = new DirectChannelMappingWithDefault( [
-	0 , null ,
-	1 , null ,
-	2 , null ,
-	null , 255
-] ) ;
-
-PortableImage.GRAY_ALPHA_COMPATIBLE_TO_RGBA_MAPPING = new DirectChannelMapping( [ 0 , 0 , 0 , 1 ] ) ;
-
-PortableImage.GRAY_COMPATIBLE_TO_RGBA_MAPPING = new DirectChannelMappingWithDefault( [
-	0 , null ,
-	0 , null ,
-	0 , null ,
-	null , 255
-] ) ;
-
-PortableImage.RGBA_COMPATIBLE_TO_GRAY_ALPHA_MAPPING = new CompositeChannelMapping(
-	[
-		1 / 3 , 1 / 3 , 1 / 3 , 0 , 0 ,
-		0 , 0 , 0 , 1 , 0
-	] ,
-	4
-) ;
-
-PortableImage.RGB_COMPATIBLE_TO_GRAY_ALPHA_MAPPING = new CompositeChannelMapping(
-	[
-		1 / 3 , 1 / 3 , 1 / 3 , 0 ,
-		0 , 0 , 0 , 255
-	] ,
-	3
-) ;
-
-
 }).call(this)}).call(this,require("buffer").Buffer)
-},{"buffer":8}],4:[function(require,module,exports){
+},{"./Mapping.js":1,"buffer":9}],5:[function(require,module,exports){
 /*! crc32.js (C) 2014-present SheetJS -- http://sheetjs.com */
 /* vim: set ts=2: */
 /*exported CRC32 */
@@ -1866,7 +1898,7 @@ CRC32.buf = crc32_buf;
 CRC32.str = crc32_str;
 }));
 
-},{}],5:[function(require,module,exports){
+},{}],6:[function(require,module,exports){
 (function (Buffer){(function (){
 /*
 	Stream Kit
@@ -2271,7 +2303,7 @@ SequentialReadBuffer.prototype.readUBitsBE = function( bitCount ) {
 
 
 }).call(this)}).call(this,require("buffer").Buffer)
-},{"buffer":8}],6:[function(require,module,exports){
+},{"buffer":9}],7:[function(require,module,exports){
 (function (Buffer){(function (){
 /*
 	Stream Kit
@@ -2719,7 +2751,7 @@ SequentialWriteBuffer.prototype.writeUBitsBE = function( v , bitCount ) {
 
 
 }).call(this)}).call(this,require("buffer").Buffer)
-},{"buffer":8}],7:[function(require,module,exports){
+},{"buffer":9}],8:[function(require,module,exports){
 'use strict'
 
 exports.byteLength = byteLength
@@ -2871,7 +2903,7 @@ function fromByteArray (uint8) {
   return parts.join('')
 }
 
-},{}],8:[function(require,module,exports){
+},{}],9:[function(require,module,exports){
 (function (Buffer){(function (){
 /*!
  * The buffer module from node.js, for the browser.
@@ -4652,7 +4684,7 @@ function numberIsNaN (obj) {
 }
 
 }).call(this)}).call(this,require("buffer").Buffer)
-},{"base64-js":7,"buffer":8,"ieee754":9}],9:[function(require,module,exports){
+},{"base64-js":8,"buffer":9,"ieee754":10}],10:[function(require,module,exports){
 /*! ieee754. BSD-3-Clause License. Feross Aboukhadijeh <https://feross.org/opensource> */
 exports.read = function (buffer, offset, isLE, mLen, nBytes) {
   var e, m
@@ -4739,7 +4771,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
   buffer[offset + i - d] |= s * 128
 }
 
-},{}],10:[function(require,module,exports){
+},{}],11:[function(require,module,exports){
 // shim for using process in browser
 var process = module.exports = {};
 
@@ -4925,5 +4957,5 @@ process.chdir = function (dir) {
 };
 process.umask = function() { return 0; };
 
-},{}]},{},[1])(1)
+},{}]},{},[2])(2)
 });

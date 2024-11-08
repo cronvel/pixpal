@@ -28,11 +28,16 @@
 
 
 
+const Png = PixPal.Png ;
+const PortableImage = PixPal.PortableImage ;
+
+
+
 async function testIndexed() {
 	var $canvas = document.getElementById( 'canvas' ) ;
 	var ctx = $canvas.getContext( '2d' ) ;
 
-	var portableImage = await PixPal.Png.loadImage( 'tiny-indexed.png' , { crc32: true } ) ;
+	var portableImage = await Png.loadImage( 'tiny-indexed.png' , { crc32: true } ) ;
 	console.log( portableImage ) ;
 
 	var imageDataParams = { scaleX: 20 , scaleY: 20 } ;
@@ -84,19 +89,33 @@ async function testTrueColor() {
 		ctx = $canvas.getContext( '2d' ) ;
 
 	//filename = 'tiny-rgba.png' ;
-	filename = 'tiny-rgb.png' ;
-	//filename = 'tiny-rgba-2.png' ;
+	filename = 'tiny-rgba-2.png' ;
+	//filename = 'tiny-rgb.png' ;
 	//filename = 'tiny-indexed.png' ;
 	//filename = 'tiny-grayscale.png' ;
 	//filename = 'tiny-grayscale-alpha.png' ;
 	//filename = 'spectrum-and-alpha.png' ;
-	var portableImage = await PixPal.Png.loadImage( filename , { crc32: true } ) ;
+	var portableImage = await Png.loadImage( filename , { crc32: true } ) ;
 	console.log( portableImage ) ;
 
 	//ctx.fillStyle = "green"; ctx.fillRect(0, 0, 100, 100);
 
 	//imageDataParams = {} ;
-	imageDataParams = { scaleX: 20 , scaleY: 20 } ;
+	imageDataParams = {
+		scaleX: 20 ,
+		scaleY: 20 ,
+		//*
+		mapping: new PortableImage.CompositeChannelMapping(
+			[
+				0 , 0 , 1 , 0 , 0 ,
+				0 , 1 , 0 , 0 , 0 ,
+				1 , 0 , 0 , 0 , 0 ,
+				0 , 0 , 0 , -1 , 255
+			] ,
+			4
+		)
+		//*/
+	} ;
 	var imageData = portableImage.createImageData( imageDataParams ) ;
 	ctx.putImageData( imageData , 0 , 0 ) ;
 }
