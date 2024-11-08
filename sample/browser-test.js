@@ -105,7 +105,7 @@ async function testTrueColor() {
 		scaleX: 20 ,
 		scaleY: 20 ,
 		//*
-		mapping: new PortableImage.CompositeChannelMapping(
+		mapping: new PortableImage.MatrixChannelMapping(
 			[
 				0 , 0 , 1 , 0 , 0 ,
 				0 , 1 , 0 , 0 , 0 ,
