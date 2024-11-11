@@ -105,7 +105,7 @@ async function testTrueColor() {
 	imageDataParams = {
 		scaleX: 20 ,
 		scaleY: 20 ,
-		//*
+		/*
 		mapping: new PortableImage.MatrixChannelMapping(
 			[
 				0 , 0 , 1 , 0 , 0 ,
@@ -124,19 +124,23 @@ async function testTrueColor() {
 
 
 async function testCompositing() {
-	var filename , imageDataParams , overlayImageDataParams ,
+	var filename , imageDataParams , overlayFilename , overlayImageDataParams ,
 		$canvas = document.getElementById( 'canvas' ) ,
 		ctx = $canvas.getContext( '2d' ) ;
 
 	//filename = 'tiny-rgba.png' ;
-	filename = 'tiny-rgba-2.png' ;
+	//filename = 'tiny-rgba-2.png' ;
 	//filename = 'tiny-rgb.png' ;
 	//filename = 'tiny-indexed.png' ;
 	//filename = 'tiny-grayscale.png' ;
 	//filename = 'tiny-grayscale-alpha.png' ;
 	//filename = 'spectrum-and-alpha.png' ;
+	filename = 'heart.png' ;
 	var portableImage = await Png.loadImage( filename , { crc32: true } ) ;
-	var overlayPortableImage = await Png.loadImage( 'heart.png' , { crc32: true } ) ;
+
+	//overlayFilename = 'heart.png' ;
+	overlayFilename = 'tiny-rgba-2.png' ;
+	var overlayPortableImage = await Png.loadImage( overlayFilename , { crc32: true } ) ;
 
 	//ctx.fillStyle = "green"; ctx.fillRect(0, 0, 100, 100);
 
@@ -148,10 +152,14 @@ async function testCompositing() {
 	var imageData = portableImage.createImageData( imageDataParams ) ;
 
 	overlayImageDataParams = {
-		//scaleX: 20 , scaleY: 20 ,
-		scaleX: 10 , scaleY: 10 ,
-		x: 25 , y: 25 ,
-		compositing: PortableImage.compositing.mask ,
+		scaleX: 20 , scaleY: 20 ,
+		//scaleX: 10 , scaleY: 10 ,
+		//x: 25 , y: 25 ,
+		//compositing: PortableImage.compositing.mask ,
+		//compositing: PortableImage.compositing.normal ,
+		//compositing: PortableImage.compositing.multiply ,
+		//compositing: PortableImage.compositing.screen ,
+		compositing: PortableImage.compositing.overlay ,
 	} ;
 	overlayPortableImage.updateImageData( imageData , overlayImageDataParams ) ;
 

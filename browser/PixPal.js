@@ -51,7 +51,9 @@ module.exports = Mapping ;
 
 
 
-function clamp( value ) { return Math.max( 0 , Math.min( 255 , Math.round( value ) ) ) ; }
+function clampUint8( value ) { return Math.max( 0 , Math.min( 255 , Math.round( value ) ) ) ; }
+function normalizedToUint8( value ) { return Math.max( 0 , Math.min( 255 , Math.round( 255 * value ) ) ) ; }
+function uint8ToNormalized( value ) { return Math.max( 0 , Math.min( 1 , value / 255 ) ) ; }
 
 const NO_COMPOSITING = {
 	alpha: ( alphaSrc /*, alphaDst */ ) => alphaSrc ,
@@ -82,18 +84,21 @@ DirectChannelMapping.prototype.map = function( src , dst , iSrc , iDst , srcBuff
 DirectChannelMapping.prototype.compose = function( src , dst , iSrc , iDst , compositing = NO_COMPOSITING , srcBuffer = src.buffer ) {
 	let alphaDst = dst.buffer[ iDst + this.alphaChannelDst ] / 255 ;
 	let alphaSrc = 1 ;
+	let alphaRes = 1 ;
 
 	for ( let cDst of this.composeChannelOrder ) {
 		if ( cDst === this.alphaChannelDst ) {
 			alphaSrc = srcBuffer[ iSrc + this.matrix[ cDst ] ] / 255 ;
-			dst.buffer[ iDst + cDst ] = clamp( compositing.alpha( alphaSrc , alphaDst ) * 255 ) ;
+			alphaRes = compositing.alpha( alphaSrc , alphaDst ) ;
+			dst.buffer[ iDst + cDst ] = normalizedToUint8( alphaRes ) ;
 		}
 		else {
-			dst.buffer[ iDst + cDst ] = clamp( compositing.channel(
+			dst.buffer[ iDst + cDst ] = normalizedToUint8( compositing.channel(
 				alphaSrc ,
 				alphaDst ,
-				srcBuffer[ iSrc + this.matrix[ cDst ] ] ,
-				dst.buffer[ iDst + cDst ]
+				alphaRes ,
+				srcBuffer[ iSrc + this.matrix[ cDst ] ] / 255 ,
+				dst.buffer[ iDst + cDst ] / 255
 			) ) ;
 		}
 	}
@@ -124,18 +129,21 @@ DirectChannelMappingWithDefault.prototype.map = function( src , dst , iSrc , iDs
 DirectChannelMappingWithDefault.prototype.compose = function( src , dst , iSrc , iDst , compositing = NO_COMPOSITING , srcBuffer = src.buffer ) {
 	let alphaDst = dst.buffer[ iDst + this.alphaChannelDst ] / 255 ;
 	let alphaSrc = 1 ;
+	let alphaRes = 1 ;
 
 	for ( let cDst of this.composeChannelOrder ) {
 		if ( cDst === this.alphaChannelDst ) {
 			alphaSrc = ( this.matrix[ cDst * 2 + 1 ] ?? srcBuffer[ iSrc + this.matrix[ cDst * 2 ] ] ) / 255 ;
-			dst.buffer[ iDst + cDst ] = clamp( compositing.alpha( alphaSrc , alphaDst ) * 255 ) ;
+			alphaRes = compositing.alpha( alphaSrc , alphaDst ) ;
+			dst.buffer[ iDst + cDst ] = normalizedToUint8( alphaRes ) ;
 		}
 		else {
-			dst.buffer[ iDst + cDst ] = clamp( compositing.channel(
+			dst.buffer[ iDst + cDst ] = normalizedToUint8( compositing.channel(
 				alphaSrc ,
 				alphaDst ,
-				this.matrix[ cDst * 2 + 1 ] ?? srcBuffer[ iSrc + this.matrix[ cDst * 2 ] ] ,
-				dst.buffer[ iDst + cDst ]
+				alphaRes ,
+				( this.matrix[ cDst * 2 + 1 ] ?? srcBuffer[ iSrc + this.matrix[ cDst * 2 ] ] ) / 255 ,
+				dst.buffer[ iDst + cDst ] / 255
 			) ) ;
 		}
 	}
@@ -169,13 +177,14 @@ MatrixChannelMapping.prototype.map = function( src , dst , iSrc , iDst , srcBuff
 
 		value += this.matrix[ matrixIndex ++ ] ;	// This is the additionnal value
 
-		dst.buffer[ iDst + cDst ] = clamp( value ) ;
+		dst.buffer[ iDst + cDst ] = clampUint8( value ) ;
 	}
 } ;
 
 MatrixChannelMapping.prototype.compose = function( src , dst , iSrc , iDst , compositing = NO_COMPOSITING , srcBuffer = src.buffer ) {
 	let alphaDst = dst.buffer[ iDst + this.alphaChannelDst ] / 255 ;
 	let alphaSrc = 1 ;
+	let alphaRes = 1 ;
 
 	for ( let cDst of this.composeChannelOrder ) {
 		let matrixIndex = cDst * ( this.srcChannelsUsed + 1 ) ;
@@ -186,18 +195,20 @@ MatrixChannelMapping.prototype.compose = function( src , dst , iSrc , iDst , com
 		}
 
 		value += this.matrix[ matrixIndex ++ ] ;	// This is the additionnal value
+		value = uint8ToNormalized( value ) ;
 
 		if ( cDst === this.alphaChannelDst ) {
 			// Always executed at the first loop iteration
-			alphaSrc = value / 255 ;
-			dst.buffer[ iDst + cDst ] = clamp( compositing.alpha( alphaSrc , alphaDst ) * 255 ) ;
+			alphaRes = compositing.alpha( value , alphaDst ) ;
+			dst.buffer[ iDst + cDst ] = normalizedToUint8( alphaRes ) ;
 		}
 		else {
-			dst.buffer[ iDst + cDst ] = clamp( compositing.channel(
+			dst.buffer[ iDst + cDst ] = normalizedToUint8( compositing.channel(
 				alphaSrc ,
 				alphaDst ,
+				alphaRes ,
 				value ,
-				dst.buffer[ iDst + cDst ]
+				dst.buffer[ iDst + cDst ] / 255
 			) ) ;
 		}
 	}
@@ -1988,20 +1999,60 @@ module.exports = compositing ;
 // The normal alpha-blending mode
 compositing.normal = {
 	alpha: ( alphaSrc , alphaDst ) => alphaSrc + alphaDst * ( 1 - alphaSrc ) ,
-	channel: ( alphaSrc , alphaDst , channelSrc , channelDst ) =>
-		( channelSrc * alphaSrc + channelDst * alphaDst * ( 1 - alphaSrc ) ) / compositing.normal.alpha( alphaSrc , alphaDst )
+	channel: ( alphaSrc , alphaDst , alphaRes , channelSrc , channelDst ) =>
+		( channelSrc * alphaSrc + channelDst * alphaDst * ( 1 - alphaSrc ) ) / alphaRes || 0
 } ;
 
 // Alpha is considered fully transparent (=0) or fully opaque (≥1)
 compositing.mask = {
 	alpha: ( alphaSrc , alphaDst ) => alphaSrc ? 1 : alphaDst ,
-	channel: ( alphaSrc , alphaDst , channelSrc , channelDst ) => alphaSrc ? channelSrc : channelDst
+	channel: ( alphaSrc , alphaDst , alphaRes , channelSrc , channelDst ) => alphaSrc ? channelSrc : channelDst
+} ;
+
+// Advanced compositing methods.
+// See: https://en.wikipedia.org/wiki/Alpha_compositing
+
+// Multiply, always produce darker output
+compositing.multiply = {
+	alpha: compositing.normal.alpha ,
+	channel: ( alphaSrc , alphaDst , alphaRes , channelSrc , channelDst ) => compositing.normal.channel(
+		alphaSrc ,
+		alphaDst ,
+		alphaRes ,
+		channelSrc * ( channelDst * alphaDst + ( 1 - alphaDst ) ) ,
+		channelDst
+	)
+} ;
+
+// Inverse of multiply, always produce brighter output
+compositing.screen = {
+	alpha: compositing.normal.alpha ,
+	channel: ( alphaSrc , alphaDst , alphaRes , channelSrc , channelDst ) => compositing.normal.channel(
+		alphaSrc ,
+		alphaDst ,
+		alphaRes ,
+		1 - ( 1 - channelSrc ) * ( 1 - channelDst * alphaDst ) ,
+		channelDst
+	)
+} ;
+
+// Overlay, either a screen or a multiply, with a factor 2.
+// Not working ATM, the factor 2 is not working well with alpha blending.
+compositing.overlay = {
+	alpha: compositing.normal.alpha ,
+	channel: ( alphaSrc , alphaDst , alphaRes , channelSrc , channelDst ) => compositing.normal.channel(
+		alphaSrc ,
+		alphaDst ,
+		alphaRes ,
+		channelDst * alphaDst + ( 1 - alphaDst ) < 0.5 ?
+			2 * channelSrc * ( channelDst * alphaDst + ( 1 - alphaDst ) ) :
+			1 - 2 * ( 1 - channelSrc ) * ( 1 - channelDst * alphaDst ) ,
+		channelDst
+	)
 } ;
 
 
 
-// TODO: screen, overlay, multiply, and so on...
-// See: https://en.wikipedia.org/wiki/Alpha_compositing
 
 
 },{}],6:[function(require,module,exports){
