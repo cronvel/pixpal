@@ -157,9 +157,9 @@ async function testCompositing() {
 		//x: 25 , y: 25 ,
 		//compositing: PortableImage.compositing.mask ,
 		//compositing: PortableImage.compositing.normal ,
-		//compositing: PortableImage.compositing.multiply ,
+		compositing: PortableImage.compositing.multiply ,
 		//compositing: PortableImage.compositing.screen ,
-		compositing: PortableImage.compositing.overlay ,
+		//compositing: PortableImage.compositing.overlay ,
 	} ;
 	overlayPortableImage.updateImageData( imageData , overlayImageDataParams ) ;
 

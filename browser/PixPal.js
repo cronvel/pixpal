@@ -2019,7 +2019,7 @@ compositing.multiply = {
 		alphaSrc ,
 		alphaDst ,
 		alphaRes ,
-		channelSrc * ( channelDst * alphaDst + ( 1 - alphaDst ) ) ,
+		channelSrc * ( 1 + ( channelDst - 1 ) * alphaDst ) ,
 		channelDst
 	)
 } ;
@@ -2037,22 +2037,21 @@ compositing.screen = {
 } ;
 
 // Overlay, either a screen or a multiply, with a factor 2.
-// Not working ATM, the factor 2 is not working well with alpha blending.
 compositing.overlay = {
 	alpha: compositing.normal.alpha ,
 	channel: ( alphaSrc , alphaDst , alphaRes , channelSrc , channelDst ) => compositing.normal.channel(
 		alphaSrc ,
 		alphaDst ,
 		alphaRes ,
-		channelDst * alphaDst + ( 1 - alphaDst ) < 0.5 ?
-			2 * channelSrc * ( channelDst * alphaDst + ( 1 - alphaDst ) ) :
-			1 - 2 * ( 1 - channelSrc ) * ( 1 - channelDst * alphaDst ) ,
+			// Got trouble making it work with dst alpha channel, the original resources just check if dst < 0.5,
+			// I made it three-way to solve issues when dst has low or transparency alpha, so that it's color info
+			// doesn't affect the blending color.
+			1 + ( channelDst - 1 ) * alphaDst < 0.5   ?   2 * channelSrc * ( 1 + ( channelDst - 1 ) * alphaDst )       :
+			channelDst * alphaDst > 0.5               ?   1 - 2 * ( 1 - channelSrc ) * ( 1 - channelDst * alphaDst )   :
+			channelSrc ,
 		channelDst
 	)
 } ;
-
-
-
 
 
 },{}],6:[function(require,module,exports){
