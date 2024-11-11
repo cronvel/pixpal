@@ -83,6 +83,7 @@ async function testIndexed() {
 }
 
 
+
 async function testTrueColor() {
 	var filename , imageDataParams ,
 		$canvas = document.getElementById( 'canvas' ) ,
@@ -121,6 +122,43 @@ async function testTrueColor() {
 }
 
 
+
+async function testCompositing() {
+	var filename , imageDataParams , overlayImageDataParams ,
+		$canvas = document.getElementById( 'canvas' ) ,
+		ctx = $canvas.getContext( '2d' ) ;
+
+	//filename = 'tiny-rgba.png' ;
+	filename = 'tiny-rgba-2.png' ;
+	//filename = 'tiny-rgb.png' ;
+	//filename = 'tiny-indexed.png' ;
+	//filename = 'tiny-grayscale.png' ;
+	//filename = 'tiny-grayscale-alpha.png' ;
+	//filename = 'spectrum-and-alpha.png' ;
+	var portableImage = await Png.loadImage( filename , { crc32: true } ) ;
+	var overlayPortableImage = await Png.loadImage( 'heart.png' , { crc32: true } ) ;
+
+	//ctx.fillStyle = "green"; ctx.fillRect(0, 0, 100, 100);
+
+	//imageDataParams = {} ;
+	imageDataParams = {
+		scaleX: 20 ,
+		scaleY: 20
+	} ;
+	var imageData = portableImage.createImageData( imageDataParams ) ;
+
+	overlayImageDataParams = {
+		//scaleX: 20 , scaleY: 20 ,
+		scaleX: 10 , scaleY: 10 ,
+		x: 25 , y: 25 ,
+		compositing: PortableImage.compositing.mask ,
+	} ;
+	overlayPortableImage.updateImageData( imageData , overlayImageDataParams ) ;
+
+	ctx.putImageData( imageData , 0 , 0 ) ;
+}
+
+
 // Like jQuery's $(document).ready()
 const ready = callback => {
     document.addEventListener( 'DOMContentLoaded' , function internalCallback() {
@@ -132,5 +170,6 @@ const ready = callback => {
 
 
 //ready( testIndexed ) ;
-ready( testTrueColor ) ;
+//ready( testTrueColor ) ;
+ready( testCompositing ) ;
 

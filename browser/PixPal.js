@@ -33,10 +33,16 @@
 function Mapping( matrix , alphaChannelDst ) {
 	this.matrix = matrix ;
 	this.alphaChannelDst = alphaChannelDst ?? null ;
-	this.dstChannels = 0 ;
+	this.composeChannelOrder = null ;
 
 	if ( this.alphaChannelDst === null ) {
 		this.compose = this.map ;
+	}
+	else {
+		this.composeChannelOrder = [ this.alphaChannelDst ] ;
+		for ( let i = 0 ; i < this.dstChannels ; i ++ ) {
+			if ( i !== this.alphaChannelDst ) { this.composeChannelOrder.push( i ) ; }
+		}
 	}
 }
 Mapping.prototype.map = function() {} ;
@@ -59,8 +65,8 @@ const NO_COMPOSITING = {
 	Each entry is a src channel index.
 */
 function DirectChannelMapping( matrix , alphaChannelDst ) {
+	this.dstChannels = matrix.length ;
 	Mapping.call( this , matrix , alphaChannelDst ) ;
-	this.dstChannels = this.matrix.length ;
 }
 
 DirectChannelMapping.prototype = Object.create( Mapping.prototype ) ;
@@ -73,12 +79,13 @@ DirectChannelMapping.prototype.map = function( src , dst , iSrc , iDst , srcBuff
 	}
 } ;
 
-DirectChannelMapping.prototype.compose = function( src , dst , iSrc , iDst , srcBuffer = src.buffer , compositing = NO_COMPOSITING ) {
+DirectChannelMapping.prototype.compose = function( src , dst , iSrc , iDst , compositing = NO_COMPOSITING , srcBuffer = src.buffer ) {
 	let alphaDst = dst.buffer[ iDst + this.alphaChannelDst ] / 255 ;
-	let alphaSrc = srcBuffer[ iSrc + this.matrix[ this.alphaChannelDst ] ] / 255 ;
+	let alphaSrc = 1 ;
 
-	for ( let cDst = 0 ; cDst < dst.channels ; cDst ++ ) {
+	for ( let cDst of this.composeChannelOrder ) {
 		if ( cDst === this.alphaChannelDst ) {
+			alphaSrc = srcBuffer[ iSrc + this.matrix[ cDst ] ] / 255 ;
 			dst.buffer[ iDst + cDst ] = clamp( compositing.alpha( alphaSrc , alphaDst ) * 255 ) ;
 		}
 		else {
@@ -100,8 +107,8 @@ DirectChannelMapping.prototype.compose = function( src , dst , iSrc , iDst , src
 	The default value is used unless its value is null.
 */
 function DirectChannelMappingWithDefault( matrix , alphaChannelDst ) {
+	this.dstChannels = Math.floor( matrix.length / 2 ) ;
 	Mapping.call( this , matrix , alphaChannelDst ) ;
-	this.dstChannels = Math.floor( this.matrix.length / 2 ) ;
 }
 
 DirectChannelMappingWithDefault.prototype = Object.create( Mapping.prototype ) ;
@@ -114,12 +121,13 @@ DirectChannelMappingWithDefault.prototype.map = function( src , dst , iSrc , iDs
 	}
 } ;
 
-DirectChannelMappingWithDefault.prototype.compose = function( src , dst , iSrc , iDst , srcBuffer = src.buffer , compositing = NO_COMPOSITING ) {
+DirectChannelMappingWithDefault.prototype.compose = function( src , dst , iSrc , iDst , compositing = NO_COMPOSITING , srcBuffer = src.buffer ) {
 	let alphaDst = dst.buffer[ iDst + this.alphaChannelDst ] / 255 ;
-	let alphaSrc = ( this.matrix[ this.alphaChannelDst * 2 + 1 ] ?? srcBuffer[ iSrc + this.matrix[ this.alphaChannelDst * 2 ] ] ) / 255 ;
+	let alphaSrc = 1 ;
 
-	for ( let cDst = 0 ; cDst < dst.channels ; cDst ++ ) {
+	for ( let cDst of this.composeChannelOrder ) {
 		if ( cDst === this.alphaChannelDst ) {
+			alphaSrc = ( this.matrix[ cDst * 2 + 1 ] ?? srcBuffer[ iSrc + this.matrix[ cDst * 2 ] ] ) / 255 ;
 			dst.buffer[ iDst + cDst ] = clamp( compositing.alpha( alphaSrc , alphaDst ) * 255 ) ;
 		}
 		else {
@@ -140,17 +148,9 @@ DirectChannelMappingWithDefault.prototype.compose = function( src , dst , iSrc ,
 	There are ( srcChannelsUsed + 1 ) entries per dst channel, the last one is the additionnal value.
 */
 function MatrixChannelMapping( matrix , srcChannelsUsed , alphaChannelDst ) {
-	Mapping.call( this , matrix , alphaChannelDst ) ;
+	this.dstChannels = Math.floor( matrix.length / ( srcChannelsUsed + 1 ) ) ;
 	this.srcChannelsUsed = srcChannelsUsed ;
-	this.dstChannels = Math.floor( this.matrix.length / ( srcChannelsUsed + 1 ) ) ;
-	this.composeChannelOrder = null ;
-
-	if ( this.alphaChannelDst !== null ) {
-		this.composeChannelOrder = [ this.alphaChannelDst ] ;
-		for ( let i = 0 ; i < this.dstChannels ; i ++ ) {
-			if ( i !== this.alphaChannelDst ) { this.composeChannelOrder.push( i ) ; }
-		}
-	}
+	Mapping.call( this , matrix , alphaChannelDst ) ;
 }
 
 MatrixChannelMapping.prototype = Object.create( Mapping.prototype ) ;
@@ -173,9 +173,9 @@ MatrixChannelMapping.prototype.map = function( src , dst , iSrc , iDst , srcBuff
 	}
 } ;
 
-MatrixChannelMapping.prototype.compose = function( src , dst , iSrc , iDst , srcBuffer = src.buffer , compositing = NO_COMPOSITING ) {
+MatrixChannelMapping.prototype.compose = function( src , dst , iSrc , iDst , compositing = NO_COMPOSITING , srcBuffer = src.buffer ) {
 	let alphaDst = dst.buffer[ iDst + this.alphaChannelDst ] / 255 ;
-	let alphaSrc = 0 ;
+	let alphaSrc = 1 ;
 
 	for ( let cDst of this.composeChannelOrder ) {
 		let matrixIndex = cDst * ( this.srcChannelsUsed + 1 ) ;
@@ -502,7 +502,7 @@ PixPal.prototype.toPng = function( options = {} ) {
 
 
 }).call(this)}).call(this,require("buffer").Buffer)
-},{"./Png.js":3,"./PortableImage.js":4,"buffer":9}],3:[function(require,module,exports){
+},{"./Png.js":3,"./PortableImage.js":4,"buffer":10}],3:[function(require,module,exports){
 (function (process,Buffer){(function (){
 /*
 	PixPal
@@ -1330,7 +1330,7 @@ async function deflate( buffer ) {
 
 
 }).call(this)}).call(this,require('_process'),require("buffer").Buffer)
-},{"./PortableImage.js":4,"_process":11,"buffer":9,"crc-32":5,"stream-kit/lib/SequentialReadBuffer.js":6,"stream-kit/lib/SequentialWriteBuffer.js":7}],4:[function(require,module,exports){
+},{"./PortableImage.js":4,"_process":12,"buffer":10,"crc-32":6,"stream-kit/lib/SequentialReadBuffer.js":7,"stream-kit/lib/SequentialWriteBuffer.js":8}],4:[function(require,module,exports){
 (function (Buffer){(function (){
 /*
 	PixPal
@@ -1432,6 +1432,8 @@ PortableImage.Mapping = Mapping ;
 PortableImage.DirectChannelMapping = Mapping.DirectChannelMapping ;
 PortableImage.DirectChannelMappingWithDefault = Mapping.DirectChannelMappingWithDefault ;
 PortableImage.MatrixChannelMapping = Mapping.MatrixChannelMapping ;
+
+PortableImage.compositing = require( './compositing.js' ) ;
 
 
 
@@ -1691,11 +1693,15 @@ PortableImage.prototype.updateImageData = function( imageData , params = {} ) {
 		width: this.width ,
 		height: this.height ,
 		bytesPerPixel: this.bytesPerPixel ,
-		x: 0 ,
-		y: 0 ,
+		x: params.x < 0 ? - params.x / scaleX : 0 ,
+		y: params.y < 0 ? - params.y / scaleY : 0 ,
 		endX: this.width ,
 		endY: this.height ,
-		channels: this.channels.length
+		channels: this.channels.length ,
+		scaleX ,
+		scaleY ,
+		mapping ,
+		compositing: params.compositing || null
 	} ;
 
 	let dst = {
@@ -1703,52 +1709,29 @@ PortableImage.prototype.updateImageData = function( imageData , params = {} ) {
 		width: imageData.width ,
 		height: imageData.height ,
 		bytesPerPixel: 4 ,
-		x: 0 ,
-		y: 0 ,
+		x: params.x > 0 ? params.x : 0 ,
+		y: params.y > 0 ? params.y : 0 ,
 		endX: imageData.width ,
 		endY: imageData.height ,
-		scaleX ,
-		scaleY ,
 		channels: 4 ,
-		mapping
 	} ;
 
-	if ( this.indexed ) {
-		src.palette = this.palette ;
-		PortableImage.indexedBlit( src , dst ) ;
+	if ( src.compositing ) {
+		if ( this.indexed ) {
+			src.palette = this.palette ;
+			PortableImage.indexedCompositingBlit( src , dst ) ;
+		}
+		else {
+			PortableImage.compositingBlit( src , dst ) ;
+		}
 	}
 	else {
-		PortableImage.blit( src , dst ) ;
-	}
-} ;
-
-
-
-/*
-	src, dst:
-		* buffer: array-like
-		* width,height: geometry stored in the array-like
-		* bytesPerPixel
-		* x,y: coordinate where to start copying (included)
-		* endX,endY: coordinate where to stop copying (excluded)
-	dst:
-		* scaleX,scaleY: drawing scale (nearest)
-		* channelValues: an array of values for each channel, if a value is null/undefined, we got it from the channel mapping
-		* mapping: the mapping of the channel from src to dst, it is an array of twice the number of the channels, pairs of values :
-			* the first value of the pair is the channel fixed value, it's null if the second of the pair should be used instead
-			* the second value of the pair is the source channel index, it's null if the first of the pair should be used instead
-*/
-PortableImage.blit = function( src , dst ) {
-	//console.warn( ".blit() used" , src , dst ) ;
-	var blitWidth = Math.min( dst.endX - dst.x , ( src.endX - src.x ) * dst.scaleX ) ,
-		blitHeight = Math.min( dst.endY - dst.y , ( src.endY - src.y ) * dst.scaleY ) ,
-		channels = Math.floor( dst.mapping.length / 2 ) ;
-
-	for ( let yOffset = 0 ; yOffset < blitHeight ; yOffset ++ ) {
-		for ( let xOffset = 0 ; xOffset < blitWidth ; xOffset ++ ) {
-			let iDst = ( ( dst.y + yOffset ) * dst.width + ( dst.x + xOffset ) ) * dst.bytesPerPixel ;
-			let iSrc = ( Math.floor( src.y + yOffset / dst.scaleY ) * src.width + Math.floor( src.x + xOffset / dst.scaleX ) ) * src.bytesPerPixel ;
-			dst.mapping.map( src , dst , iSrc , iDst ) ;
+		if ( this.indexed ) {
+			src.palette = this.palette ;
+			PortableImage.indexedBlit( src , dst ) ;
+		}
+		else {
+			PortableImage.blit( src , dst ) ;
 		}
 	}
 } ;
@@ -1756,25 +1739,106 @@ PortableImage.blit = function( src , dst ) {
 
 
 /*
-	Perform a blit, but the source pixel is an index, that will be substituted by the relevant source palette .
+	Perform a regular blit, copying a rectangle are a the src to a rectangulare are of the dst.
 
-	Same arguments than .blit(), plus:
-
-	src:
-		palette: an array of array of values
+	src, dst:
+		* buffer: array-like
+		* width,height: geometry stored in the array-like
+		* bytesPerPixel
+		* x,y: coordinate where to start copying (included)
+		* endX,endY: coordinate where to stop copying (excluded)
+	src only:
+		* scaleX,scaleY: drawing scale (nearest)
+		* mapping: an instance of Mapping, that maps the channels from src to dst
 */
-PortableImage.indexedBlit = function( src , dst ) {
-	//console.warn( ".indexedBlit() used" , src , dst ) ;
-	var blitWidth = Math.min( dst.endX - dst.x , ( src.endX - src.x ) * dst.scaleX ) ,
-		blitHeight = Math.min( dst.endY - dst.y , ( src.endY - src.y ) * dst.scaleY ) ,
-		channels = Math.floor( dst.mapping.length / 2 ) ;
+PortableImage.blit = function( src , dst ) {
+	//console.warn( ".blit() used" , src , dst ) ;
+	var blitWidth = Math.min( dst.endX - dst.x , ( src.endX - src.x ) * src.scaleX ) ,
+		blitHeight = Math.min( dst.endY - dst.y , ( src.endY - src.y ) * src.scaleY ) ,
+		channels = Math.floor( src.mapping.length / 2 ) ;
 
 	for ( let yOffset = 0 ; yOffset < blitHeight ; yOffset ++ ) {
 		for ( let xOffset = 0 ; xOffset < blitWidth ; xOffset ++ ) {
 			let iDst = ( ( dst.y + yOffset ) * dst.width + ( dst.x + xOffset ) ) * dst.bytesPerPixel ;
-			let iSrc = ( Math.floor( src.y + yOffset / dst.scaleY ) * src.width + Math.floor( src.x + xOffset / dst.scaleX ) ) * src.bytesPerPixel ;
+			let iSrc = ( Math.floor( src.y + yOffset / src.scaleY ) * src.width + Math.floor( src.x + xOffset / src.scaleX ) ) * src.bytesPerPixel ;
+			src.mapping.map( src , dst , iSrc , iDst ) ;
+		}
+	}
+} ;
+
+
+
+/*
+	Perform a blit, but the source pixel is an index, that will be substituted by the relevant source palette.
+
+	Same arguments than .blit(), plus:
+
+	src only:
+		* palette: an array of array of values
+*/
+PortableImage.indexedBlit = function( src , dst ) {
+	//console.warn( ".indexedBlit() used" , src , dst ) ;
+	var blitWidth = Math.min( dst.endX - dst.x , ( src.endX - src.x ) * src.scaleX ) ,
+		blitHeight = Math.min( dst.endY - dst.y , ( src.endY - src.y ) * src.scaleY ) ,
+		channels = Math.floor( src.mapping.length / 2 ) ;
+
+	for ( let yOffset = 0 ; yOffset < blitHeight ; yOffset ++ ) {
+		for ( let xOffset = 0 ; xOffset < blitWidth ; xOffset ++ ) {
+			let iDst = ( ( dst.y + yOffset ) * dst.width + ( dst.x + xOffset ) ) * dst.bytesPerPixel ;
+			let iSrc = ( Math.floor( src.y + yOffset / src.scaleY ) * src.width + Math.floor( src.x + xOffset / src.scaleX ) ) * src.bytesPerPixel ;
 			let channelValues = src.palette[ src.buffer[ iSrc ] ] ;
-			dst.mapping.map( src , dst , 0 , iDst , channelValues ) ;
+			src.mapping.map( src , dst , 0 , iDst , channelValues ) ;
+		}
+	}
+} ;
+
+
+
+/*
+	Perform a blit, but with compositing (alpha-blending, etc).
+
+	src only:
+		* compositing: a compositing object, having a method "alpha" and "channel"
+*/
+PortableImage.compositingBlit = function( src , dst ) {
+	//console.warn( ".compositingBlit() used" , src , dst ) ;
+	var blitWidth = Math.min( dst.endX - dst.x , ( src.endX - src.x ) * src.scaleX ) ,
+		blitHeight = Math.min( dst.endY - dst.y , ( src.endY - src.y ) * src.scaleY ) ,
+		channels = Math.floor( src.mapping.length / 2 ) ;
+
+	for ( let yOffset = 0 ; yOffset < blitHeight ; yOffset ++ ) {
+		for ( let xOffset = 0 ; xOffset < blitWidth ; xOffset ++ ) {
+			let iDst = ( ( dst.y + yOffset ) * dst.width + ( dst.x + xOffset ) ) * dst.bytesPerPixel ;
+			let iSrc = ( Math.floor( src.y + yOffset / src.scaleY ) * src.width + Math.floor( src.x + xOffset / src.scaleX ) ) * src.bytesPerPixel ;
+			src.mapping.compose( src , dst , iSrc , iDst , src.compositing ) ;
+		}
+	}
+} ;
+
+
+
+/*
+	Perform a blit, but with compositing (alpha-blending, etc) + the source pixel is an index,
+	that will be substituted by the relevant source palette.
+
+	Same arguments than .blit(), plus:
+
+	src only:
+		* palette: an array of array of values
+		* compositing: a compositing object, having a method "alpha" and "channel"
+*/
+PortableImage.indexedCompositingBlit = function( src , dst ) {
+	console.warn( ".indexedCompositingBlit() used" , src , dst ) ;
+	var blitWidth = Math.min( dst.endX - dst.x , ( src.endX - src.x ) * src.scaleX ) ,
+		blitHeight = Math.min( dst.endY - dst.y , ( src.endY - src.y ) * src.scaleY ) ,
+		channels = Math.floor( src.mapping.length / 2 ) ;
+
+	for ( let yOffset = 0 ; yOffset < blitHeight ; yOffset ++ ) {
+		for ( let xOffset = 0 ; xOffset < blitWidth ; xOffset ++ ) {
+			let iDst = ( ( dst.y + yOffset ) * dst.width + ( dst.x + xOffset ) ) * dst.bytesPerPixel ;
+			let iSrc = ( Math.floor( src.y + yOffset / src.scaleY ) * src.width + Math.floor( src.x + xOffset / src.scaleX ) ) * src.bytesPerPixel ;
+			let channelValues = src.palette[ src.buffer[ iSrc ] ] ;
+			src.mapping.compose( src , dst , 0 , iDst , src.compositing , channelValues ) ;
 		}
 	}
 } ;
@@ -1885,7 +1949,62 @@ PortableImage.prototype.updateFromImageData = function( imageData , mapping ) {
 
 
 }).call(this)}).call(this,require("buffer").Buffer)
-},{"./Mapping.js":1,"buffer":9}],5:[function(require,module,exports){
+},{"./Mapping.js":1,"./compositing.js":5,"buffer":10}],5:[function(require,module,exports){
+/*
+	PixPal
+
+	Copyright (c) 2024 Cédric Ronvel
+
+	The MIT License (MIT)
+
+	Permission is hereby granted, free of charge, to any person obtaining a copy
+	of this software and associated documentation files (the "Software"), to deal
+	in the Software without restriction, including without limitation the rights
+	to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+	copies of the Software, and to permit persons to whom the Software is
+	furnished to do so, subject to the following conditions:
+
+	The above copyright notice and this permission notice shall be included in all
+	copies or substantial portions of the Software.
+
+	THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+	IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+	FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+	AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+	LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+	OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+	SOFTWARE.
+*/
+
+"use strict" ;
+
+
+
+const compositing = {} ;
+module.exports = compositing ;
+
+
+
+// The normal alpha-blending mode
+compositing.normal = {
+	alpha: ( alphaSrc , alphaDst ) => alphaSrc + alphaDst * ( 1 - alphaSrc ) ,
+	channel: ( alphaSrc , alphaDst , channelSrc , channelDst ) =>
+		( channelSrc * alphaSrc + channelDst * alphaDst * ( 1 - alphaSrc ) ) / compositing.normal.alpha( alphaSrc , alphaDst )
+} ;
+
+// Alpha is considered fully transparent (=0) or fully opaque (≥1)
+compositing.mask = {
+	alpha: ( alphaSrc , alphaDst ) => alphaSrc ? 1 : alphaDst ,
+	channel: ( alphaSrc , alphaDst , channelSrc , channelDst ) => alphaSrc ? channelSrc : channelDst
+} ;
+
+
+
+// TODO: screen, overlay, multiply, and so on...
+// See: https://en.wikipedia.org/wiki/Alpha_compositing
+
+
+},{}],6:[function(require,module,exports){
 /*! crc32.js (C) 2014-present SheetJS -- http://sheetjs.com */
 /* vim: set ts=2: */
 /*exported CRC32 */
@@ -2002,7 +2121,7 @@ CRC32.buf = crc32_buf;
 CRC32.str = crc32_str;
 }));
 
-},{}],6:[function(require,module,exports){
+},{}],7:[function(require,module,exports){
 (function (Buffer){(function (){
 /*
 	Stream Kit
@@ -2407,7 +2526,7 @@ SequentialReadBuffer.prototype.readUBitsBE = function( bitCount ) {
 
 
 }).call(this)}).call(this,require("buffer").Buffer)
-},{"buffer":9}],7:[function(require,module,exports){
+},{"buffer":10}],8:[function(require,module,exports){
 (function (Buffer){(function (){
 /*
 	Stream Kit
@@ -2855,7 +2974,7 @@ SequentialWriteBuffer.prototype.writeUBitsBE = function( v , bitCount ) {
 
 
 }).call(this)}).call(this,require("buffer").Buffer)
-},{"buffer":9}],8:[function(require,module,exports){
+},{"buffer":10}],9:[function(require,module,exports){
 'use strict'
 
 exports.byteLength = byteLength
@@ -3007,7 +3126,7 @@ function fromByteArray (uint8) {
   return parts.join('')
 }
 
-},{}],9:[function(require,module,exports){
+},{}],10:[function(require,module,exports){
 (function (Buffer){(function (){
 /*!
  * The buffer module from node.js, for the browser.
@@ -4788,7 +4907,7 @@ function numberIsNaN (obj) {
 }
 
 }).call(this)}).call(this,require("buffer").Buffer)
-},{"base64-js":8,"buffer":9,"ieee754":10}],10:[function(require,module,exports){
+},{"base64-js":9,"buffer":10,"ieee754":11}],11:[function(require,module,exports){
 /*! ieee754. BSD-3-Clause License. Feross Aboukhadijeh <https://feross.org/opensource> */
 exports.read = function (buffer, offset, isLE, mLen, nBytes) {
   var e, m
@@ -4875,7 +4994,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
   buffer[offset + i - d] |= s * 128
 }
 
-},{}],11:[function(require,module,exports){
+},{}],12:[function(require,module,exports){
 // shim for using process in browser
 var process = module.exports = {};
 
