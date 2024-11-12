@@ -45,6 +45,7 @@ function Mapping( matrix , alphaChannelDst ) {
 		}
 	}
 }
+
 Mapping.prototype.map = function() {} ;
 Mapping.prototype.compose = function() {} ;
 module.exports = Mapping ;
@@ -84,19 +85,16 @@ DirectChannelMapping.prototype.map = function( src , dst , iSrc , iDst , srcBuff
 DirectChannelMapping.prototype.compose = function( src , dst , iSrc , iDst , compositing = NO_COMPOSITING , srcBuffer = src.buffer ) {
 	let alphaDst = dst.buffer[ iDst + this.alphaChannelDst ] / 255 ;
 	let alphaSrc = 1 ;
-	let alphaRes = 1 ;
 
 	for ( let cDst of this.composeChannelOrder ) {
 		if ( cDst === this.alphaChannelDst ) {
 			alphaSrc = srcBuffer[ iSrc + this.matrix[ cDst ] ] / 255 ;
-			alphaRes = compositing.alpha( alphaSrc , alphaDst ) ;
-			dst.buffer[ iDst + cDst ] = normalizedToUint8( alphaRes ) ;
+			dst.buffer[ iDst + cDst ] = normalizedToUint8( compositing.alpha( alphaSrc , alphaDst ) ) ;
 		}
 		else {
 			dst.buffer[ iDst + cDst ] = normalizedToUint8( compositing.channel(
 				alphaSrc ,
 				alphaDst ,
-				alphaRes ,
 				srcBuffer[ iSrc + this.matrix[ cDst ] ] / 255 ,
 				dst.buffer[ iDst + cDst ] / 255
 			) ) ;
@@ -129,19 +127,16 @@ DirectChannelMappingWithDefault.prototype.map = function( src , dst , iSrc , iDs
 DirectChannelMappingWithDefault.prototype.compose = function( src , dst , iSrc , iDst , compositing = NO_COMPOSITING , srcBuffer = src.buffer ) {
 	let alphaDst = dst.buffer[ iDst + this.alphaChannelDst ] / 255 ;
 	let alphaSrc = 1 ;
-	let alphaRes = 1 ;
 
 	for ( let cDst of this.composeChannelOrder ) {
 		if ( cDst === this.alphaChannelDst ) {
 			alphaSrc = ( this.matrix[ cDst * 2 + 1 ] ?? srcBuffer[ iSrc + this.matrix[ cDst * 2 ] ] ) / 255 ;
-			alphaRes = compositing.alpha( alphaSrc , alphaDst ) ;
-			dst.buffer[ iDst + cDst ] = normalizedToUint8( alphaRes ) ;
+			dst.buffer[ iDst + cDst ] = normalizedToUint8( compositing.alpha( alphaSrc , alphaDst ) ) ;
 		}
 		else {
 			dst.buffer[ iDst + cDst ] = normalizedToUint8( compositing.channel(
 				alphaSrc ,
 				alphaDst ,
-				alphaRes ,
 				( this.matrix[ cDst * 2 + 1 ] ?? srcBuffer[ iSrc + this.matrix[ cDst * 2 ] ] ) / 255 ,
 				dst.buffer[ iDst + cDst ] / 255
 			) ) ;
@@ -184,7 +179,6 @@ MatrixChannelMapping.prototype.map = function( src , dst , iSrc , iDst , srcBuff
 MatrixChannelMapping.prototype.compose = function( src , dst , iSrc , iDst , compositing = NO_COMPOSITING , srcBuffer = src.buffer ) {
 	let alphaDst = dst.buffer[ iDst + this.alphaChannelDst ] / 255 ;
 	let alphaSrc = 1 ;
-	let alphaRes = 1 ;
 
 	for ( let cDst of this.composeChannelOrder ) {
 		let matrixIndex = cDst * ( this.srcChannelsUsed + 1 ) ;
@@ -199,14 +193,12 @@ MatrixChannelMapping.prototype.compose = function( src , dst , iSrc , iDst , com
 
 		if ( cDst === this.alphaChannelDst ) {
 			// Always executed at the first loop iteration
-			alphaRes = compositing.alpha( value , alphaDst ) ;
-			dst.buffer[ iDst + cDst ] = normalizedToUint8( alphaRes ) ;
+			dst.buffer[ iDst + cDst ] = normalizedToUint8( compositing.alpha( value , alphaDst ) ) ;
 		}
 		else {
 			dst.buffer[ iDst + cDst ] = normalizedToUint8( compositing.channel(
 				alphaSrc ,
 				alphaDst ,
-				alphaRes ,
 				value ,
 				dst.buffer[ iDst + cDst ] / 255
 			) ) ;
@@ -1996,18 +1988,48 @@ module.exports = compositing ;
 
 
 
-// The normal alpha-blending mode
-compositing.normal = {
+// The normal alpha-blending mode, a “top” layer replacing a “bottom” one.
+compositing.normal = compositing.over = {
 	alpha: ( alphaSrc , alphaDst ) => alphaSrc + alphaDst * ( 1 - alphaSrc ) ,
-	channel: ( alphaSrc , alphaDst , alphaRes , channelSrc , channelDst ) =>
-		( channelSrc * alphaSrc + channelDst * alphaDst * ( 1 - alphaSrc ) ) / alphaRes || 0
+	channel: ( alphaSrc , alphaDst , channelSrc , channelDst ) =>
+		( channelSrc * alphaSrc + channelDst * alphaDst * ( 1 - alphaSrc ) ) / ( alphaSrc + alphaDst * ( 1 - alphaSrc ) ) || 0
 } ;
 
-// Alpha is considered fully transparent (=0) or fully opaque (≥1)
-compositing.mask = {
+// Like normal/over, but alpha is considered fully transparent (=0) or fully opaque (≥1).
+compositing.binaryOver = {
 	alpha: ( alphaSrc , alphaDst ) => alphaSrc ? 1 : alphaDst ,
-	channel: ( alphaSrc , alphaDst , alphaRes , channelSrc , channelDst ) => alphaSrc ? channelSrc : channelDst
+	channel: ( alphaSrc , alphaDst , channelSrc , channelDst ) => alphaSrc ? channelSrc : channelDst
 } ;
+
+// This intersect the src and the dst for alpha, while using the same method than “over” for the channel.
+// The result is opaque only where both are opaque.
+compositing.in = {
+	alpha: ( alphaSrc , alphaDst ) => alphaSrc * alphaDst ,
+	channel: compositing.normal.channel
+} ;
+
+// Src is only copied where dst is transparent, it's like a “in” with dst alpha inverted.
+compositing.out = {
+	alpha: ( alphaSrc , alphaDst ) => alphaSrc * ( 1 - alphaDst ) ,
+	channel: ( alphaSrc , alphaDst , channelSrc , channelDst ) =>
+		( channelSrc * alphaSrc + channelDst * ( 1 - alphaDst ) * ( 1 - alphaSrc ) ) / ( alphaSrc + ( 1 - alphaDst ) * ( 1 - alphaSrc ) ) || 0
+} ;
+
+// Src is only copied where both src and dst are opaque, opaque dst area are left untouched where src is transparent.
+// It uses the same method than “over” for the channel.
+compositing.atop = {
+	alpha: ( alphaSrc , alphaDst ) => compositing.normal.alpha( alphaSrc , alphaDst ) * alphaDst ,
+	channel: compositing.normal.channel
+} ;
+
+// This use an analogic xor for alpha, while using the same method than “over” for the channel.
+// The result is opaque only where only one is opaque.
+compositing.xor = {
+	alpha: ( alphaSrc , alphaDst ) => alphaSrc * ( 1 - alphaDst ) + alphaDst * ( 1 - alphaSrc ) ,
+	channel: compositing.normal.channel
+} ;
+
+
 
 // Advanced compositing methods.
 // See: https://en.wikipedia.org/wiki/Alpha_compositing
@@ -2015,10 +2037,9 @@ compositing.mask = {
 // Multiply, always produce darker output
 compositing.multiply = {
 	alpha: compositing.normal.alpha ,
-	channel: ( alphaSrc , alphaDst , alphaRes , channelSrc , channelDst ) => compositing.normal.channel(
+	channel: ( alphaSrc , alphaDst , channelSrc , channelDst ) => compositing.normal.channel(
 		alphaSrc ,
 		alphaDst ,
-		alphaRes ,
 		channelSrc * ( 1 + ( channelDst - 1 ) * alphaDst ) ,
 		channelDst
 	)
@@ -2027,10 +2048,9 @@ compositing.multiply = {
 // Inverse of multiply, always produce brighter output
 compositing.screen = {
 	alpha: compositing.normal.alpha ,
-	channel: ( alphaSrc , alphaDst , alphaRes , channelSrc , channelDst ) => compositing.normal.channel(
+	channel: ( alphaSrc , alphaDst , channelSrc , channelDst ) => compositing.normal.channel(
 		alphaSrc ,
 		alphaDst ,
-		alphaRes ,
 		1 - ( 1 - channelSrc ) * ( 1 - channelDst * alphaDst ) ,
 		channelDst
 	)
@@ -2039,12 +2059,11 @@ compositing.screen = {
 // Overlay, either a screen or a multiply, with a factor 2.
 compositing.overlay = {
 	alpha: compositing.normal.alpha ,
-	channel: ( alphaSrc , alphaDst , alphaRes , channelSrc , channelDst ) => compositing.normal.channel(
+	channel: ( alphaSrc , alphaDst , channelSrc , channelDst ) => compositing.normal.channel(
 		alphaSrc ,
 		alphaDst ,
-		alphaRes ,
 			// Got trouble making it work with dst alpha channel, the original resources just check if dst < 0.5,
-			// I made it three-way to solve issues when dst has low or transparency alpha, so that it's color info
+			// I made it three-way to solve issues when dst has low or transparency alpha, so that is color info
 			// doesn't affect the blending color.
 			1 + ( channelDst - 1 ) * alphaDst < 0.5   ?   2 * channelSrc * ( 1 + ( channelDst - 1 ) * alphaDst )       :
 			channelDst * alphaDst > 0.5               ?   1 - 2 * ( 1 - channelSrc ) * ( 1 - channelDst * alphaDst )   :
